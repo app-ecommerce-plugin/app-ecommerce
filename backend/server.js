@@ -1,19 +1,24 @@
+require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
-require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware de sesión
+// Middleware para sesiones (ya estaba correcto)
 app.use(session({
-  secret: 'secreto_para_sesion',
+  secret: process.env.SESSION_SECRET || 'CAMBIA_ESTE_SECRETO_EN_PRODUCCION',
   resave: false,
   saveUninitialized: true
 }));
 
-// Inicia autenticación OAuth
+// Endpoint de prueba
+app.get('/', (req, res) => {
+  res.send('Servidor funcionando correctamente en Render');
+});
+
+// OAuth inicio (ya estaba correcto)
 app.get('/auth/shopify', (req, res) => {
   const shop = req.query.shop;
   const apiKey = process.env.SHOPIFY_API_KEY;
@@ -26,7 +31,7 @@ app.get('/auth/shopify', (req, res) => {
   res.redirect(installUrl);
 });
 
-// Callback OAuth
+// Callback OAuth adaptado (mínimo cambio)
 app.get('/auth/shopify/callback', async (req, res) => {
   const { shop, code, state } = req.query;
 
@@ -34,7 +39,6 @@ app.get('/auth/shopify/callback', async (req, res) => {
     return res.status(403).send('Request origin cannot be verified');
   }
 
-  const accessTokenRequestUrl = `https://${shop}/admin/oauth/access_token`;
   const payload = {
     client_id: process.env.SHOPIFY_API_KEY,
     client_secret: process.env.SHOPIFY_API_SECRET,
@@ -42,16 +46,21 @@ app.get('/auth/shopify/callback', async (req, res) => {
   };
 
   try {
-    const response = await axios.post(accessTokenRequestUrl, payload);
+    const response = await axios.post(`https://${shop}/admin/oauth/access_token`, payload);
     req.session.accessToken = response.data.access_token;
     req.session.shop = shop;
 
     res.send('OAuth completado con éxito!');
   } catch (error) {
-    res.status(500).send('Error en OAuth');
+    res.status(500).send(`Error en OAuth: ${error.message}`);
   }
 });
 
+// Servidor activo
+app.get('/', (req, res) => {
+  res.send('Servidor Shopify activo!');
+});
+
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en el puerto ${PORT}`);
+  console.log(`Servidor corriendo en puerto ${PORT}`);
 });
