@@ -3,11 +3,14 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const cors = require('cors');
-app.use(cors());
-
-
 const app = express();
 const PORT = process.env.PORT;
+
+app.use(cors({
+  origin: 'https://app-ecommerce-1.onrender.com', // REEMPLAZA CON LA URL DE TU FRONTEND EN RENDER
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  credentials: true
+}));
 
 // Middleware para sesiones (ya estaba correcto)
 app.use(session({
