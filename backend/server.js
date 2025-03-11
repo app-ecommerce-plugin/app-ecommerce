@@ -12,6 +12,15 @@ app.use(cors({
   credentials: true
 }));
 
+// Middleware adicional para asegurar que todas las respuestas incluyen CORS
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "https://app-ecommerce-1.onrender.com"); // REEMPLAZA CON TU URL DEL FRONTEND
+  res.header("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+  next();
+});
+
 // Middleware para sesiones (ya estaba correcto)
 app.use(session({
   secret: process.env.SESSION_SECRET || 'CAMBIA_ESTE_SECRETO_EN_PRODUCCION',
