@@ -2,9 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
+const cors = require('cors');
+app.use(cors());
+
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 
 // Middleware para sesiones (ya estaba correcto)
 app.use(session({
