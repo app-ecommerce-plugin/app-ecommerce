@@ -3,37 +3,51 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const cors = require('cors');
-const app = express();
-const PORT = process.env.PORT;
+const RedisStore = require('connect-redis').default;
+const { createClient } = require('redis');
 
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Configurar CORS
 app.use(cors({
-  origin: 'https://app-ecommerce-1.onrender.com', // REEMPLAZA CON LA URL DE TU FRONTEND EN RENDER
+  origin: process.env.FRONTEND_URL, // SE DEBE CONFIGURAR EN .env
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   credentials: true
 }));
 
-// Middleware adicional para asegurar que todas las respuestas incluyen CORS
+// Configurar Redis para sesiones
+const redisClient = createClient({ url: process.env.REDIS_URL });
+
+redisClient.connect().catch(console.error);
+
+app.use(session({
+  store: new RedisStore({ client: redisClient }),
+  secret: process.env.SESSION_SECRET, // SE DEBE CONFIGURAR EN .env
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: true, // CAMBIAR A FALSE SI PRUEBAS LOCALMENTE SIN HTTPS
+    httpOnly: true,
+    maxAge: 1000 * 60 * 60 * 24 // 24 horas
+  }
+}));
+
+// Middleware para CORS (Extra, por si acaso)
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "https://app-ecommerce-1.onrender.com"); // REEMPLAZA CON TU URL DEL FRONTEND
+  res.header("Access-Control-Allow-Origin", process.env.FRONTEND_URL); // SE DEBE CONFIGURAR EN .env
   res.header("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
   res.header("Access-Control-Allow-Credentials", "true");
   next();
 });
 
-// Middleware para sesiones (ya estaba correcto)
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'CAMBIA_ESTE_SECRETO_EN_PRODUCCION',
-  resave: false,
-  saveUninitialized: true
-}));
-
 // Endpoint de prueba
 app.get('/', (req, res) => {
   res.send('Servidor funcionando correctamente en Render');
 });
 
-// OAuth inicio (ya estaba correcto)
+// OAuth Shopify
 app.get('/auth/shopify', (req, res) => {
   const shop = req.query.shop;
   const apiKey = process.env.SHOPIFY_API_KEY;
@@ -46,14 +60,15 @@ app.get('/auth/shopify', (req, res) => {
   res.redirect(installUrl);
 });
 
-// Callback OAuth adaptado (mínimo cambio)
+// Callback OAuth Shopify
 app.get('/auth/shopify/callback', async (req, res) => {
   const { shop, code, state } = req.query;
 
   if (state !== req.session.state) {
-    return res.status(403).send('Request origin cannot be verified');
+    return res.status(403).send('No se puede verificar el origen de la solicitud');
   }
 
+  const accessTokenRequestUrl = `https://${shop}/admin/oauth/access_token`;
   const payload = {
     client_id: process.env.SHOPIFY_API_KEY,
     client_secret: process.env.SHOPIFY_API_SECRET,
@@ -61,7 +76,7 @@ app.get('/auth/shopify/callback', async (req, res) => {
   };
 
   try {
-    const response = await axios.post(`https://${shop}/admin/oauth/access_token`, payload);
+    const response = await axios.post(accessTokenRequestUrl, payload);
     req.session.accessToken = response.data.access_token;
     req.session.shop = shop;
 
@@ -72,10 +87,6 @@ app.get('/auth/shopify/callback', async (req, res) => {
 });
 
 // Servidor activo
-app.get('/', (req, res) => {
-  res.send('Servidor Shopify activo!');
-});
-
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
