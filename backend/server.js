@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 
 // Configurar CORS
 app.use(cors({
-  origin: process.env.FRONTEND_URL, // SE DEBE CONFIGURAR EN .env
+  origin: process.env.FRONTEND_URL,
   methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   credentials: true
 }));
@@ -23,19 +23,19 @@ redisClient.connect().catch(console.error);
 
 app.use(session({
   store: new RedisStore({ client: redisClient }),
-  secret: process.env.SESSION_SECRET, // SE DEBE CONFIGURAR EN .env
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true, // CAMBIAR A FALSE SI PRUEBAS LOCALMENTE SIN HTTPS
+    secure: true,
     httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 24 // 24 horas
+    maxAge: 1000 * 60 * 60 * 24
   }
 }));
 
-// Middleware para CORS (Extra, por si acaso)
+// Middleware adicional para CORS
 app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", process.env.FRONTEND_URL); // SE DEBE CONFIGURAR EN .env
+  res.header("Access-Control-Allow-Origin", process.env.FRONTEND_URL);
   res.header("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
   res.header("Access-Control-Allow-Credentials", "true");
@@ -47,20 +47,22 @@ app.get('/', (req, res) => {
   res.send('Servidor funcionando correctamente en Render');
 });
 
-// OAuth Shopify
+// OAuth Shopify actualizado
 app.get('/auth/shopify', (req, res) => {
   const shop = req.query.shop;
+  if (!shop) return res.status(400).send('Se requiere el parámetro "shop"');
+
   const apiKey = process.env.SHOPIFY_API_KEY;
   const scopes = process.env.SHOPIFY_SCOPES;
   const redirectUri = process.env.SHOPIFY_REDIRECT_URI;
   const state = Math.random().toString(36).substring(2);
 
   req.session.state = state;
-  const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${apiKey}&scope=${scopes}&redirect_uri=${redirectUri}&state=${state}`;
-  res.redirect(installUrl);
+  const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${apiKey}&scope=${scopes}&redirect_uri=${redirectUri}&state=${state}`;
+  res.redirect(authUrl);
 });
 
-// Callback OAuth Shopify
+// Callback OAuth Shopify actualizado
 app.get('/auth/shopify/callback', async (req, res) => {
   const { shop, code, state } = req.query;
 
@@ -80,7 +82,7 @@ app.get('/auth/shopify/callback', async (req, res) => {
     req.session.accessToken = response.data.access_token;
     req.session.shop = shop;
 
-    res.send('OAuth completado con éxito!');
+    res.redirect(`${process.env.FRONTEND_URL}?shop=${shop}&auth=success`);
   } catch (error) {
     res.status(500).send(`Error en OAuth: ${error.message}`);
   }
