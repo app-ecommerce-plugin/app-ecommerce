@@ -3,7 +3,8 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const cors = require('cors');
-const RedisStore = require('connect-redis').default;
+//const RedisStore = require('connect-redis').default;
+const RedisStore = connectRedis(session);
 const { createClient } = require('redis');
 const crypto = require('crypto');
 
