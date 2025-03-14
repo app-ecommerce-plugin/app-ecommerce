@@ -3,8 +3,8 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const cors = require('cors');
-const RedisStore = require('connect-redis').default;
 const { createClient } = require('redis');
+const RedisStore = require('connect-redis').default; // Sintaxis correcta para v7+
 const crypto = require('crypto');
 
 const app = express();
@@ -17,22 +17,35 @@ app.use(cors({
 }));
 
 // Cliente Redis
-const redisClient = createClient({ url: process.env.REDIS_URL });
+const redisClient = createClient({ 
+  url: process.env.REDIS_URL,
+  legacyMode: false // Importante para versiones modernas
+});
 
-redisClient.connect()
-  .then(() => console.log('Conectado a Redis correctamente'))
-  .catch(err => console.error('Error al conectar Redis:', err));
+// Conexión a Redis antes de configurar la sesión
+const connectRedis = async () => {
+  try {
+    await redisClient.connect();
+    console.log('Conectado a Redis correctamente');
+  } catch (err) {
+    console.error('Error al conectar Redis:', err);
+    process.exit(1); // Salir si hay error crítico
+  }
+};
+
+connectRedis();
 
 // Configuración de sesiones
 app.use(session({
-  store: new RedisStore({ client: redisClient }),
+  store: new RedisStore({ client: redisClient }), // Correcto para connect-redis@7+
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true,
+    secure: process.env.NODE_ENV === 'production', // Compatible con desarrollo/test
     httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 24
+    maxAge: 1000 * 60 * 60 * 24,
+    sameSite: 'none' // Necesario si el frontend está en otro dominio
   }
 }));
 
@@ -91,7 +104,7 @@ app.get('/auth/shopify/callback', async (req, res) => {
   }
 });
 
-// Endpoint para obtener productos (verificación OAuth)
+// Endpoint para obtener productos
 app.get('/shopify/products', async (req, res) => {
   if (!req.session.accessToken || !req.session.shop) {
     return res.status(401).send('OAuth aún no se ha completado.');
