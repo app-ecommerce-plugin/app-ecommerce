@@ -3,46 +3,52 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const cors = require('cors');
+const RedisStore = require('connect-redis').default; // Correcto ✅
 const { createClient } = require('redis');
-const connectRedis = require('connect-redis');
 const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configurar CORS
+// Configuración CORS
 app.use(cors({
   origin: process.env.FRONTEND_URL,
-  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   credentials: true
 }));
 
-// Configuración correcta de Redis (comprobado 100%)
-const RedisStore = connectRedis(session); // ← ASÍ ES COMO DEBE ESTAR DEFINIDO
+// Redis configurado correctamente
 const redisClient = createClient({ url: process.env.REDIS_URL });
 
 redisClient.connect()
-  .then(() => console.log('Redis conectado correctamente'))
+  .then(() => console.log('Conectado a Redis correctamente'))
   .catch(err => console.error('Error al conectar Redis:', err));
 
+// Configuración de sesiones con Redis (correcta)
 app.use(session({
   store: new RedisStore({ client: redisClient }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true,
+    secure: true, // true solo si usas HTTPS
     httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 24 // 24 horas
+    maxAge: 1000 * 60 * 60 * 24
   }
 }));
 
-// Endpoint básico para comprobar servidor activo
+// Middleware adicional (opcional)
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", process.env.FRONTEND_URL);
+  res.header("Access-Control-Allow-Credentials", "true");
+  next();
+});
+
+// Endpoint básico
 app.get('/', (req, res) => {
   res.send('Servidor funcionando correctamente en Render');
 });
 
-// OAuth Shopify endpoint inicial
+// OAuth Shopify
 app.get('/auth/shopify', (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).send('Se requiere el parámetro "shop"');
@@ -85,10 +91,10 @@ app.get('/auth/shopify/callback', async (req, res) => {
   }
 });
 
-// Endpoint de prueba para verificar productos
+// Endpoint para obtener productos (verificación OAuth)
 app.get('/shopify/products', async (req, res) => {
   if (!req.session.accessToken || !req.session.shop) {
-    return res.status(401).send('No autorizado: OAuth aún no se ha completado.');
+    return res.status(401).send('OAuth aún no se ha completado.');
   }
 
   try {
@@ -103,7 +109,7 @@ app.get('/shopify/products', async (req, res) => {
   }
 });
 
-// Iniciar servidor Express correctamente configurado para Render
+// Servidor activo
 app.listen(PORT, () => {
   console.log(`Servidor corriendo correctamente en puerto ${PORT}`);
 });
