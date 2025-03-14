@@ -3,16 +3,17 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const cors = require('cors');
-const connectRedis = require('connect-redis');
+const RedisStore = require("connect-redis").default;
 const { createClient } = require('redis');
 const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuración CORS
+// CORS correctamente configurado
 app.use(cors({
   origin: process.env.FRONTEND_URL,
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   credentials: true
 }));
 
@@ -23,22 +24,20 @@ redisClient.connect()
   .then(() => console.log('Conectado a Redis correctamente'))
   .catch(err => console.error('Error al conectar Redis:', err));
 
-// Sesiones con Redis
-const RedisStore = connectRedis(session);
-
+// Configuración de sesiones con Redis (correcta)
 app.use(session({
   store: new RedisStore({ client: redisClient }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true, // true solo si usas HTTPS
+    secure: true,
     httpOnly: true,
     maxAge: 1000 * 60 * 60 * 24
   }
 }));
 
-// Middleware adicional (opcional)
+// Middleware adicional
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", process.env.FRONTEND_URL);
   res.header("Access-Control-Allow-Credentials", "true");
@@ -50,9 +49,18 @@ app.get('/', (req, res) => {
   res.send('Servidor funcionando correctamente en Render');
 });
 
+// Verificación sesión OAuth
+app.get('/auth/check', (req, res) => {
+  if (!req.session.accessToken) {
+    return res.status(401).send('OAuth no realizado o token perdido.');
+  }
+  res.send(`OAuth activo, tienda: ${req.session.shop}`);
+});
+
 // OAuth Shopify
 app.get('/auth/shopify', (req, res) => {
   const shop = req.query.shop;
+
   if (!shop) return res.status(400).send('Se requiere el parámetro "shop"');
 
   const apiKey = process.env.SHOPIFY_API_KEY;
@@ -93,10 +101,10 @@ app.get('/auth/shopify/callback', async (req, res) => {
   }
 });
 
-// Endpoint para obtener productos (verificación OAuth)
+// Endpoint para obtener productos
 app.get('/shopify/products', async (req, res) => {
   if (!req.session.accessToken || !req.session.shop) {
-    return res.status(401).send('OAuth aún no se ha completado.');
+    return res.status(401).send('No autorizado: OAuth aún no se ha completado.');
   }
 
   try {
