@@ -16,21 +16,21 @@ app.use(cors({
   credentials: true
 }));
 
-// Redis configurado correctamente
+// Cliente Redis
 const redisClient = createClient({ url: process.env.REDIS_URL });
 
 redisClient.connect()
   .then(() => console.log('Conectado a Redis correctamente'))
   .catch(err => console.error('Error al conectar Redis:', err));
 
-// Configuración correcta del store de sesiones con Redis
+// Configuración de sesiones
 app.use(session({
   store: new RedisStore({ client: redisClient }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true, // true solo si usas HTTPS
+    secure: true,
     httpOnly: true,
     maxAge: 1000 * 60 * 60 * 24
   }
@@ -109,7 +109,6 @@ app.get('/shopify/products', async (req, res) => {
   }
 });
 
-// Servidor activo
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo correctamente en puerto ${PORT}`);
+  console.log(`Servidor corriendo en puerto ${PORT}`);
 });
