@@ -4,7 +4,7 @@ const session = require('express-session');
 const axios = require('axios');
 const cors = require('cors');
 const { createClient } = require('redis');
-const RedisStore = require('connect-redis').default; // Sintaxis correcta para v7+
+const RedisStore = require('connect-redis');
 const crypto = require('crypto');
 
 const app = express();
@@ -37,7 +37,7 @@ connectRedis();
 
 // Configuración de sesiones
 app.use(session({
-  store: new RedisStore({ client: redisClient }), // Correcto para connect-redis@7+
+  store: RedisStore({ client: redisClient }), // Correcto para connect-redis@7+
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
