@@ -3,7 +3,7 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const cors = require('cors');
-const RedisStore = require("connect-redis").default;
+const connectRedis = require('connect-redis');
 const { createClient } = require('redis');
 const crypto = require('crypto');
 
@@ -16,14 +16,16 @@ app.use(cors({
   credentials: true
 }));
 
-// Redis configurado correctamente
+// Configuración de Redis
 const redisClient = createClient({ url: process.env.REDIS_URL });
 
 redisClient.connect()
   .then(() => console.log('Conectado a Redis correctamente'))
   .catch(err => console.error('Error al conectar Redis:', err));
 
-// Configuración de sesiones con Redis (correcta)
+// Sesiones con Redis
+const RedisStore = connectRedis(session);
+
 app.use(session({
   store: new RedisStore({ client: redisClient }),
   secret: process.env.SESSION_SECRET,
