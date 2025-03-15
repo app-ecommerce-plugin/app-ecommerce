@@ -3,8 +3,8 @@ const express = require('express');
 const session = require('express-session');
 const axios = require('axios');
 const cors = require('cors');
+const { RedisStore } = require('connect-redis'); // Corrección en importación
 const { createClient } = require('redis');
-const RedisStore = require('connect-redis');
 const crypto = require('crypto');
 
 const app = express();
@@ -17,35 +17,25 @@ app.use(cors({
 }));
 
 // Cliente Redis
-const redisClient = createClient({ 
-  url: process.env.REDIS_URL,
-  legacyMode: false // Importante para versiones modernas
-});
+const redisClient = createClient({ url: process.env.REDIS_URL });
 
-// Conexión a Redis antes de configurar la sesión
-const connectRedis = async () => {
-  try {
-    await redisClient.connect();
-    console.log('Conectado a Redis correctamente');
-  } catch (err) {
-    console.error('Error al conectar Redis:', err);
-    process.exit(1); // Salir si hay error crítico
-  }
-};
+redisClient.connect()
+  .then(() => console.log('Conectado a Redis correctamente'))
+  .catch(err => console.error('Error al conectar Redis:', err));
 
-connectRedis();
+// Habilitar 'trust proxy' para Render (cookies seguras detrás de proxy)
+app.set('trust proxy', 1);
 
 // Configuración de sesiones
 app.use(session({
-  store: RedisStore({ client: redisClient }), // Correcto para connect-redis@7+
+  store: new RedisStore({ client: redisClient }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // Compatible con desarrollo/test
+    secure: true,
     httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 24,
-    sameSite: 'none' // Necesario si el frontend está en otro dominio
+    maxAge: 1000 * 60 * 60 * 24
   }
 }));
 
@@ -104,7 +94,7 @@ app.get('/auth/shopify/callback', async (req, res) => {
   }
 });
 
-// Endpoint para obtener productos
+// Endpoint para obtener productos (verificación OAuth)
 app.get('/shopify/products', async (req, res) => {
   if (!req.session.accessToken || !req.session.shop) {
     return res.status(401).send('OAuth aún no se ha completado.');
