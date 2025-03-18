@@ -68,6 +68,7 @@ app.get('/auth/shopify', (req, res) => {
 
 
   // En lugar de redirigir, muestra la URL generada para comparar con la de Shopify
+  /*
   res.send(`
     <h1>URL generada para Shopify OAuth</h1>
     <p>Por favor, compara esta URL con la que has configurado en Shopify Partners.</p>
@@ -75,8 +76,10 @@ app.get('/auth/shopify', (req, res) => {
     <textarea style="width: 100%; height: 100px;">${authUrl}</textarea>
     <p><a href="${authUrl}" target="_blank">Ir a la autenticación</a></p>
   `);
-
-  //res.redirect(authUrl);
+  */
+ 
+  console.log("🔗 URL generada para Shopify OAuth:", authUrl);
+  res.redirect(authUrl);
 });
 
 // Callback OAuth Shopify
