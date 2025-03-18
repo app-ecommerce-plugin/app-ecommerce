@@ -79,7 +79,7 @@ app.get('/auth/shopify', (req, res) => {
   */
 
   res.send(`<p>URL generada para Shopify OAuth: <a href="${authUrl}">${authUrl}</a></p>`);
-  res.redirect(authUrl);
+  //res.redirect(authUrl);
 });
 
 // Callback OAuth Shopify
