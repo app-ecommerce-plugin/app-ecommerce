@@ -160,6 +160,23 @@ app.post("/shopify/save-selection", async (req, res) => {
   }
 });
 
+app.get('/shopify/selected-products', async (req, res) => {
+  const shop = req.query.shop;
+  if (!shop) return res.status(400).send("Falta parámetro 'shop'.");
+
+  const redisKey = `shop:${shop}:config`;
+
+  try {
+    const selected = await redisClient.hGet(redisKey, 'selected_products');
+    if (!selected) return res.json({ selected: [] });
+
+    res.json({ selected: JSON.parse(selected) });
+  } catch (err) {
+    res.status(500).send('Error recuperando datos: ' + err.message);
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });

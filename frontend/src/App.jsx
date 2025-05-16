@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import './App.css';
 import ProductSelector from './ProductSelector';
+import SelectedProducts from './SelectedProducts';
 
 function App() {
   const [message, setMessage] = useState('');
@@ -18,6 +19,8 @@ function App() {
       <p>Respuesta del backend: {message}</p>
       <hr />
       <ProductSelector />
+      <hr />
+      <SelectedProducts />
     </>
   );
 }
