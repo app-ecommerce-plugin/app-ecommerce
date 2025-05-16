@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import './App.css'
+import { useEffect, useState } from 'react';
+import './App.css';
+import ProductSelector from './ProductSelector';
 
 function App() {
   const [message, setMessage] = useState('');
@@ -15,6 +16,8 @@ function App() {
     <>
       <h1>Frontend conectado a Backend (Render)</h1>
       <p>Respuesta del backend: {message}</p>
+      <hr />
+      <ProductSelector />
     </>
   );
 }
