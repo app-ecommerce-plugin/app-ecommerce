@@ -180,3 +180,20 @@ app.get('/shopify/selected-products', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
+
+// Endpoint temporal para depuración de Redis
+app.get('/debug/redis', async (req, res) => {
+  try {
+    const keys = await redisClient.keys('shop:*');
+    const result = {};
+
+    for (const key of keys) {
+      const data = await redisClient.hGetAll(key);
+      result[key] = data;
+    }
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).send(`Error al obtener datos de Redis: ${error.message}`);
+  }
+});
