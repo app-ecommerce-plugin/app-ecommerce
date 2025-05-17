@@ -93,16 +93,20 @@ app.get("/auth/shopify/callback", async (req, res) => {
       `https://${shop}/admin/oauth/access_token`,
       payload
     );
+    const accessToken = response.data.access_token;
 
+    // 🔁 Clave hash por tienda
     const redisKey = `shop:${shop}:config`;
 
+    // 🧠 Guardar token y timestamp en un único hash
     await redisClient.hSet(redisKey, {
-      accessToken: response.data.access_token,
+      accessToken,
       installedAt: new Date().toISOString(),
     });
 
     res.redirect(`${process.env.FRONTEND_URL}?shop=${shop}&auth=success`);
   } catch (error) {
+    console.error("Error en el callback de OAuth:", error);
     res.status(500).send(`Error en OAuth: ${error.message}`);
   }
 });
@@ -132,7 +136,11 @@ app.get("/shopify/products", async (req, res) => {
 
     res.json(response.data);
   } catch (error) {
-    res.status(500).send(`Error obteniendo productos: ${error.message}`);
+    console.error(
+      "Error obteniendo productos:",
+      error.response?.data || error.message
+    );
+    res.status(500).send("Error obteniendo productos");
   }
 });
 
@@ -141,47 +149,53 @@ app.get("/shopify/products", async (req, res) => {
 //Guarda la selección en Redis bajo la clave ```shop:<shop>:selected_products```
 
 // Endpoint para guardar selección de productos en Redis
-app.post('/shopify/selected', express.json(), async (req, res) => {
+app.post("/shopify/selected", express.json(), async (req, res) => {
   const { shop, selectedProducts } = req.body;
 
   if (!shop) return res.status(400).send("Falta parámetro 'shop'");
-  if (!Array.isArray(selectedProducts)) return res.status(400).send("Formato inválido. Se espera un array de productos.");
+  if (!Array.isArray(selectedProducts))
+    return res
+      .status(400)
+      .send("Formato inválido. Se espera un array de productos.");
 
-  const redisKey = `shop:${shop}:selected_products`;
+  const redisKey = `shop:${shop}:config`;
 
   try {
-    await redisClient.set(redisKey, JSON.stringify(selectedProducts));
-    res.status(200).send("Productos seleccionados guardados con éxito");
+    await redisClient.hSet(redisKey, {
+      selected_products: JSON.stringify(selectedProducts),
+    });
+
+    res
+      .status(200)
+      .send(
+        "Productos seleccionados guardados correctamente en configuración Redis"
+      );
   } catch (err) {
-    console.error("Error guardando productos seleccionados:", err);
-    res.status(500).send("Error guardando productos seleccionados");
+    console.error("Error guardando productos en Redis:", err);
+    res.status(500).send("Error interno al guardar productos seleccionados");
   }
 });
-
 
 //El siguiente endpoint consulta Redis usando la clave: ```shop:<shop>:selected_products```
 //Devuelve un array con los IDs (u objetos, según lo que guardes) de los productos seleccionados.
 //Responde con código 404 si no hay datos guardados.
 
 // Endpoint para recuperar productos seleccionados desde Redis
-app.get('/shopify/selected', async (req, res) => {
+app.get("/shopify/selected", async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).send("Falta parámetro 'shop'");
 
-  const redisKey = `shop:${shop}:selected_products`;
+  const redisKey = `shop:${shop}:config`;
 
   try {
-    const data = await redisClient.get(redisKey);
-    if (!data) return res.status(404).send("No hay productos seleccionados para esta tienda");
-
-    const selectedProducts = JSON.parse(data);
-    res.status(200).json({ selectedProducts });
+    const selectedRaw = await redisClient.hGet(redisKey, "selected_products");
+    const selected = selectedRaw ? JSON.parse(selectedRaw) : [];
+    res.status(200).json({ selectedProducts: selected });
   } catch (err) {
-    console.error("Error al recuperar productos seleccionados:", err);
-    res.status(500).send("Error al recuperar productos seleccionados");
+    console.error("Error recuperando productos seleccionados:", err);
+    res.status(500).send("Error interno al obtener selección");
   }
 });
-
 
 // Al final de server.js, antes de app.listen
 
@@ -207,31 +221,30 @@ app.post("/shopify/save-selection", async (req, res) => {
   }
 });
 
-app.get('/shopify/selected-products', async (req, res) => {
+app.get("/shopify/selected-products", async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).send("Falta parámetro 'shop'.");
 
   const redisKey = `shop:${shop}:config`;
 
   try {
-    const selected = await redisClient.hGet(redisKey, 'selected_products');
+    const selected = await redisClient.hGet(redisKey, "selected_products");
     if (!selected) return res.json({ selected: [] });
 
     res.json({ selected: JSON.parse(selected) });
   } catch (err) {
-    res.status(500).send('Error recuperando datos: ' + err.message);
+    res.status(500).send("Error recuperando datos: " + err.message);
   }
 });
-
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);
 });
 
 // Endpoint temporal para depuración de Redis
-app.get('/debug/redis', async (req, res) => {
+app.get("/debug/redis", async (req, res) => {
   try {
-    const keys = await redisClient.keys('shop:*');
+    const keys = await redisClient.keys("shop:*");
     const result = {};
 
     for (const key of keys) {
@@ -245,5 +258,5 @@ app.get('/debug/redis', async (req, res) => {
   }
 });
 
-const comparisonRoutes = require('./routes/comparison');
+const comparisonRoutes = require("./routes/comparison");
 app.use(comparisonRoutes);
