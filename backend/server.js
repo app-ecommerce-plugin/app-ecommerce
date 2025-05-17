@@ -197,6 +197,41 @@ app.get("/shopify/selected", async (req, res) => {
   }
 });
 
+// A continuación un endpoint de depuración (solo para desarrollo)
+// 🧪 Debug temporal: consultar configuración de tienda desde Redis
+// Envuelto con una condición de entorno para no utilizar en producción
+if (process.env.NODE_ENV !== 'production') {
+app.get('/debug/shopify/config', async (req, res) => {
+  const shop = req.query.shop;
+  if (!shop) return res.status(400).send("Falta parámetro 'shop'.");
+
+  const redisKey = `shop:${shop}:config`;
+
+  try {
+    const config = await redisClient.hGetAll(redisKey);
+
+    if (!config || Object.keys(config).length === 0) {
+      return res.status(404).send("No se encontró configuración para esta tienda.");
+    }
+
+    // Si 'selected_products' existe, parsearlo
+    if (config.selected_products) {
+      try {
+        config.selected_products = JSON.parse(config.selected_products);
+      } catch {
+        config.selected_products = "⚠️ No es JSON válido";
+      }
+    }
+
+    res.json({ shop, config });
+  } catch (err) {
+    console.error("Error en /debug/shopify/config:", err);
+    res.status(500).send("Error consultando configuración en Redis.");
+  }
+});
+}
+
+
 // Al final de server.js, antes de app.listen
 
 app.use(express.json());
