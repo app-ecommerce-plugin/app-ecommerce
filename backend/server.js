@@ -142,22 +142,22 @@ app.get("/shopify/products", async (req, res) => {
 
 // Endpoint para guardar selección de productos en Redis
 app.post('/shopify/selected', express.json(), async (req, res) => {
-  const { products } = req.body;
-  const shop = req.query.shop;
+  const { shop, selectedProducts } = req.body;
 
   if (!shop) return res.status(400).send("Falta parámetro 'shop'");
-  if (!Array.isArray(products)) return res.status(400).send("Formato inválido. Se espera un array de productos.");
+  if (!Array.isArray(selectedProducts)) return res.status(400).send("Formato inválido. Se espera un array de productos.");
 
   const redisKey = `shop:${shop}:selected_products`;
 
   try {
-    await redisClient.set(redisKey, JSON.stringify(products));
+    await redisClient.set(redisKey, JSON.stringify(selectedProducts));
     res.status(200).send("Productos seleccionados guardados con éxito");
   } catch (err) {
     console.error("Error guardando productos seleccionados:", err);
     res.status(500).send("Error guardando productos seleccionados");
   }
 });
+
 
 //El siguiente endpoint consulta Redis usando la clave: ```shop:<shop>:selected_products```
 //Devuelve un array con los IDs (u objetos, según lo que guardes) de los productos seleccionados.
@@ -244,3 +244,6 @@ app.get('/debug/redis', async (req, res) => {
     res.status(500).send(`Error al obtener datos de Redis: ${error.message}`);
   }
 });
+
+const comparisonRoutes = require('./routes/comparison');
+app.use(comparisonRoutes);
