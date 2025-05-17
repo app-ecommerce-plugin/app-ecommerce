@@ -136,6 +136,53 @@ app.get("/shopify/products", async (req, res) => {
   }
 });
 
+//El siguiente endpoint recibe una lista de IDs de productos seleccionados desde el frontend.
+//Usa el parámetro ```shop``` de la query string para identificar la tienda.
+//Guarda la selección en Redis bajo la clave ```shop:<shop>:selected_products```
+
+// Endpoint para guardar selección de productos en Redis
+app.post('/shopify/selected', express.json(), async (req, res) => {
+  const { products } = req.body;
+  const shop = req.query.shop;
+
+  if (!shop) return res.status(400).send("Falta parámetro 'shop'");
+  if (!Array.isArray(products)) return res.status(400).send("Formato inválido. Se espera un array de productos.");
+
+  const redisKey = `shop:${shop}:selected_products`;
+
+  try {
+    await redisClient.set(redisKey, JSON.stringify(products));
+    res.status(200).send("Productos seleccionados guardados con éxito");
+  } catch (err) {
+    console.error("Error guardando productos seleccionados:", err);
+    res.status(500).send("Error guardando productos seleccionados");
+  }
+});
+
+//El siguiente endpoint consulta Redis usando la clave: ```shop:<shop>:selected_products```
+//Devuelve un array con los IDs (u objetos, según lo que guardes) de los productos seleccionados.
+//Responde con código 404 si no hay datos guardados.
+
+// Endpoint para recuperar productos seleccionados desde Redis
+app.get('/shopify/selected', async (req, res) => {
+  const shop = req.query.shop;
+  if (!shop) return res.status(400).send("Falta parámetro 'shop'");
+
+  const redisKey = `shop:${shop}:selected_products`;
+
+  try {
+    const data = await redisClient.get(redisKey);
+    if (!data) return res.status(404).send("No hay productos seleccionados para esta tienda");
+
+    const selectedProducts = JSON.parse(data);
+    res.status(200).json({ selectedProducts });
+  } catch (err) {
+    console.error("Error al recuperar productos seleccionados:", err);
+    res.status(500).send("Error al recuperar productos seleccionados");
+  }
+});
+
+
 // Al final de server.js, antes de app.listen
 
 app.use(express.json());
