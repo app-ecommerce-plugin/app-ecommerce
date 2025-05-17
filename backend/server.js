@@ -200,7 +200,7 @@ app.get("/shopify/selected", async (req, res) => {
 // A continuación un endpoint de depuración (solo para desarrollo)
 // 🧪 Debug temporal: consultar configuración de tienda desde Redis
 // Envuelto con una condición de entorno para no utilizar en producción
-if (process.env.NODE_ENV !== 'production') {
+//if (process.env.NODE_ENV !== 'production') {
 app.get('/debug/shopify/config', async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).send("Falta parámetro 'shop'.");
@@ -229,7 +229,7 @@ app.get('/debug/shopify/config', async (req, res) => {
     res.status(500).send("Error consultando configuración en Redis.");
   }
 });
-}
+//}
 
 
 // Al final de server.js, antes de app.listen
