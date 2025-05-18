@@ -197,6 +197,37 @@ app.get("/shopify/selected", async (req, res) => {
   }
 });
 
+//Este endpoint leerá los productos seleccionados de dos tiendas diferentes, y devolverá
+//una comparación simple de precios por nombre de producto (si coinciden por title)
+
+// Endpoint para comparar productos entre dos tiendas
+app.get('/shopify/compare', async (req, res) => {
+  const { shop1, shop2 } = req.query;
+
+  if (!shop1 || !shop2) {
+    return res.status(400).json({ error: "Se requieren parámetros 'shop1' y 'shop2'" });
+  }
+
+  try {
+    const config1 = await redisClient.hGet(`shop:${shop1}:config`, 'selected_products');
+    const config2 = await redisClient.hGet(`shop:${shop2}:config`, 'selected_products');
+
+    const productos1 = JSON.parse(config1 || '[]');
+    const productos2 = JSON.parse(config2 || '[]');
+
+    const comunes = productos1.filter(p => productos2.includes(p));
+    const soloEn1 = productos1.filter(p => !productos2.includes(p));
+    const soloEn2 = productos2.filter(p => !productos1.includes(p));
+
+    res.json({ comunes, soloEn1, soloEn2 });
+  } catch (err) {
+    console.error("Error en comparación:", err);
+    res.status(500).json({ error: "Error interno en comparación" });
+  }
+});
+
+
+
 // A continuación un endpoint de depuración (solo para desarrollo)
 // 🧪 Debug temporal: consultar configuración de tienda desde Redis
 // Envuelto con una condición de entorno para no utilizar en producción
