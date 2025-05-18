@@ -77,6 +77,10 @@ function ProductManager({ apiUrl, shop }) {
       .catch((err) => alert("Error al comparar productos: " + err.message));
   };
 
+  const limpiarComparacion = () => {
+    setCompareResult(null);
+  };
+
   return (
     <>
       <h2>🛒 Productos disponibles</h2>
@@ -107,18 +111,22 @@ function ProductManager({ apiUrl, shop }) {
       {compareResult && (
         <>
           <h2>🔎 Resultado de comparación</h2>
+          <button onClick={limpiarComparacion}>🧹 Limpiar resultados</button>
+
           <h3>🟡 Comunes</h3>
           <ul>
             {compareResult.comunes.map((id) => (
               <li key={id}>{id}</li>
             ))}
           </ul>
+
           <h3>🔴 Solo en esta tienda</h3>
           <ul>
             {compareResult.soloEn1.map((id) => (
               <li key={id}>{id}</li>
             ))}
           </ul>
+
           <h3>🟢 Solo en la otra tienda</h3>
           <ul>
             {compareResult.soloEn2.map((id) => (
