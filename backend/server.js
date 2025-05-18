@@ -215,7 +215,9 @@ app.get('/shopify/compare', async (req, res) => {
   const selectedProducts = JSON.parse(selectedJSON);
 
   try {
-    const filePath = path.join(__dirname, 'external_data', `${shop}.json`);
+
+    const filePath = path.join(__dirname, 'external_data', `${shopDomain}.json`);
+    //const filePath = path.join(__dirname, 'external_data', `${shop}.json`);
     const data = await fs.readFile(filePath, 'utf-8');
     const externalProducts = JSON.parse(data);
 
