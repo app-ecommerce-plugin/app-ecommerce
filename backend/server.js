@@ -197,34 +197,46 @@ app.get("/shopify/selected", async (req, res) => {
   }
 });
 
-//Este endpoint leerá los productos seleccionados de dos tiendas diferentes, y devolverá
-//una comparación simple de precios por nombre de producto (si coinciden por title)
+//Este endpoint leerá los productos seleccionados de una tenda con una fuente externa, y devolverá
+//una comparación simple de precios por nombre de producto
 
-// Endpoint para comparar productos entre dos tiendas
+const fs = require('fs/promises');
+const path = require('path');
+
+// Comparar precios con fuente externa
 app.get('/shopify/compare', async (req, res) => {
-  const { shop1, shop2 } = req.query;
+  const shop = req.query.shop;
+  if (!shop) return res.status(400).send("Falta parámetro 'shop'.");
 
-  if (!shop1 || !shop2) {
-    return res.status(400).json({ error: "Se requieren parámetros 'shop1' y 'shop2'" });
-  }
+  const redisKey = `shop:${shop}:config`;
+  const selectedJSON = await redisClient.hGet(redisKey, 'selected_products');
+  if (!selectedJSON) return res.status(404).send("No hay productos seleccionados.");
+
+  const selectedProducts = JSON.parse(selectedJSON);
 
   try {
-    const config1 = await redisClient.hGet(`shop:${shop1}:config`, 'selected_products');
-    const config2 = await redisClient.hGet(`shop:${shop2}:config`, 'selected_products');
+    const filePath = path.join(__dirname, 'external_data', `${shop}.json`);
+    const data = await fs.readFile(filePath, 'utf-8');
+    const externalProducts = JSON.parse(data);
 
-    const productos1 = JSON.parse(config1 || '[]');
-    const productos2 = JSON.parse(config2 || '[]');
+    const comparacion = selectedProducts.map(product => {
+      const match = externalProducts.find(ext => ext.title.trim().toLowerCase() === product.title.trim().toLowerCase());
 
-    const comunes = productos1.filter(p => productos2.includes(p));
-    const soloEn1 = productos1.filter(p => !productos2.includes(p));
-    const soloEn2 = productos2.filter(p => !productos1.includes(p));
+      return {
+        title: product.title,
+        localPrice: product.price,
+        externalPrice: match?.price || 'No encontrado',
+        source: match?.source || '-'
+      };
+    });
 
-    res.json({ comunes, soloEn1, soloEn2 });
+    res.json({ shop, comparacion });
   } catch (err) {
-    console.error("Error en comparación:", err);
-    res.status(500).json({ error: "Error interno en comparación" });
+    console.error("Error comparando productos:", err);
+    res.status(500).send("Error interno al comparar productos.");
   }
 });
+
 
 
 

@@ -1,10 +1,11 @@
-// ProductManager.jsx
+// ProductManager.jsx 
 import { useEffect, useState } from "react";
 
 function ProductManager({ apiUrl, shop }) {
   const [products, setProducts] = useState([]);
   const [selected, setSelected] = useState([]);
   const [message, setMessage] = useState("");
+  const [compareResult, setCompareResult] = useState(null);
 
   useEffect(() => {
     if (!shop) return;
@@ -58,9 +59,7 @@ function ProductManager({ apiUrl, shop }) {
     )
       .then((res) => res.json())
       .then((data) => {
-        if (data.comparaciones.length === 0) {
-          alert("No se encontraron coincidencias entre productos.");
-        } else {
+        if (data.comparaciones && data.comparaciones.length > 0) {
           const resumen = data.comparaciones
             .map(
               (p) =>
@@ -70,7 +69,10 @@ function ProductManager({ apiUrl, shop }) {
             )
             .join("\n");
           alert(`🛍️ Comparativa:\n\n${resumen}`);
+        } else {
+          alert("No se encontraron coincidencias entre productos.");
         }
+        setCompareResult(data);
       })
       .catch((err) => alert("Error al comparar productos: " + err.message));
   };
@@ -101,6 +103,30 @@ function ProductManager({ apiUrl, shop }) {
           return <li key={id}>{product?.title || id}</li>;
         })}
       </ul>
+
+      {compareResult && (
+        <>
+          <h2>🔎 Resultado de comparación</h2>
+          <h3>🟡 Comunes</h3>
+          <ul>
+            {compareResult.comunes.map((id) => (
+              <li key={id}>{id}</li>
+            ))}
+          </ul>
+          <h3>🔴 Solo en esta tienda</h3>
+          <ul>
+            {compareResult.soloEn1.map((id) => (
+              <li key={id}>{id}</li>
+            ))}
+          </ul>
+          <h3>🟢 Solo en la otra tienda</h3>
+          <ul>
+            {compareResult.soloEn2.map((id) => (
+              <li key={id}>{id}</li>
+            ))}
+          </ul>
+        </>
+      )}
     </>
   );
 }
