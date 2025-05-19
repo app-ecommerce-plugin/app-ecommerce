@@ -80,7 +80,7 @@ async function matchSemantic(products1, products2, threshold = 0.85) {
 }
 
 // Ruta principal de comparación
-router.get('/shopify/compare', async (req, res) => {
+router.get('/compare', async (req, res) => {
   const { shop1, shop2, mode } = req.query;
   if (!shop1 || !shop2) return res.status(400).json({ error: 'Faltan parámetros shop1 o shop2' });
 
