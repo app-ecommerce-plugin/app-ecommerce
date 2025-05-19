@@ -144,6 +144,8 @@ app.get("/shopify/products", async (req, res) => {
   }
 });
 
+app.use(express.json());
+
 //El siguiente endpoint recibe una lista de IDs de productos seleccionados desde el frontend.
 //Usa el parámetro ```shop``` de la query string para identificar la tienda.
 //Guarda la selección en Redis bajo la clave ```shop:<shop>:selected_products```
@@ -197,50 +199,6 @@ app.get("/shopify/selected", async (req, res) => {
   }
 });
 
-//Este endpoint leerá los productos seleccionados de una tenda con una fuente externa, y devolverá
-//una comparación simple de precios por nombre de producto
-
-const fs = require('fs/promises');
-const path = require('path');
-
-// Comparar precios con fuente externa
-app.get('/shopify/compare', async (req, res) => {
-  const shop = req.query.shop;
-  if (!shop) return res.status(400).send("Falta parámetro 'shop'.");
-
-  const redisKey = `shop:${shop}:config`;
-  const selectedJSON = await redisClient.hGet(redisKey, 'selected_products');
-  if (!selectedJSON) return res.status(404).send("No hay productos seleccionados.");
-
-  const selectedProducts = JSON.parse(selectedJSON);
-
-  try {
-
-    const filePath = path.join(__dirname, 'external_data', `${shopDomain}.json`);
-    //const filePath = path.join(__dirname, 'external_data', `${shop}.json`);
-    const data = await fs.readFile(filePath, 'utf-8');
-    const externalProducts = JSON.parse(data);
-
-    const comparacion = selectedProducts.map(product => {
-      const match = externalProducts.find(ext => ext.title.trim().toLowerCase() === product.title.trim().toLowerCase());
-
-      return {
-        title: product.title,
-        localPrice: product.price,
-        externalPrice: match?.price || 'No encontrado',
-        source: match?.source || '-'
-      };
-    });
-
-    res.json({ shop, comparacion });
-  } catch (err) {
-    console.error("Error comparando productos:", err);
-    res.status(500).send("Error interno al comparar productos.");
-  }
-});
-
-
-
 
 // A continuación un endpoint de depuración (solo para desarrollo)
 // 🧪 Debug temporal: consultar configuración de tienda desde Redis
@@ -279,8 +237,7 @@ app.get('/debug/shopify/config', async (req, res) => {
 
 // Al final de server.js, antes de app.listen
 
-app.use(express.json());
-
+/*
 app.post("/shopify/save-selection", async (req, res) => {
   const { shop, selected_products } = req.body;
 
@@ -300,7 +257,8 @@ app.post("/shopify/save-selection", async (req, res) => {
     res.status(500).send("Error guardando en Redis: " + error.message);
   }
 });
-
+*/
+/*
 app.get("/shopify/selected-products", async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).send("Falta parámetro 'shop'.");
@@ -316,6 +274,7 @@ app.get("/shopify/selected-products", async (req, res) => {
     res.status(500).send("Error recuperando datos: " + err.message);
   }
 });
+*/
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en puerto ${PORT}`);
@@ -339,4 +298,5 @@ app.get("/debug/redis", async (req, res) => {
 });
 
 const comparisonRoutes = require("./routes/comparison");
-app.use(comparisonRoutes);
+app.use("/shopify", comparisonRoutes);
+
