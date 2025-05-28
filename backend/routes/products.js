@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
-const redisClient = require('../redis');
+const redisClient = require('../utils/redisClient');
 
 // Ruta para guardar productos seleccionados
 router.post('/selected', async (req, res) => {
