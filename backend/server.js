@@ -3,13 +3,12 @@ require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
 const session = require('express-session');
-const RedisStore = require('connect-redis').default;
+const RedisStore = require('connect-redis')(session);   // <- FIX
 const redisClient = require('./utils/redisClient');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-/* ----------  MIDDLEWARE  ---------- */
 app.use(cors({
   origin: process.env.FRONTEND_URL,
   credentials: true
@@ -26,6 +25,7 @@ app.use(
     cookie: { secure: false, httpOnly: true, maxAge: 1000 * 60 * 60 * 24 }
   })
 );
+
 
 /* ----------  ROUTES  ---------- */
 app.use('/shopify',  require('./routes/products'));
