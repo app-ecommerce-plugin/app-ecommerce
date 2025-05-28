@@ -38,8 +38,8 @@ app.use(
 
 
 /* ----------  ROUTES  ---------- */
-app.use("/shopify", require("./routes/products"));
-app.use("/compare", require("./routes/comparison"));
+app.use('/shopify', require('./routes/products'));     // /shopify/selected
+app.use('/shopify', require('./routes/comparison'));   // /shopify/compare
 app.use("/auth", require("./routes/auth")); // stub (501)
 
 /* ----------  DEFAULT ---------- */
