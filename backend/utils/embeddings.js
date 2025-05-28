@@ -1,11 +1,13 @@
+// utils/embeddings.js
+
 const crypto  = require('crypto');
-const { Configuration, OpenAIApi } = require('openai');
+const OpenAI = require('openai');
 const redisClient = require('./redisClient');
 const { checkUsageLimit } = require('./usageLimit');
 
-const openai = new OpenAIApi(
-  new Configuration({ apiKey: process.env.OPENAI_API_KEY })
-);
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 /* ----------  Helpers  ---------- */
 const cacheKey = (txt) =>
