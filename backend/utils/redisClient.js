@@ -1,11 +1,15 @@
-// backend/utils/redisClient.js
-const { createClient } = require("redis");
+const { createClient } = require('redis');
 
-const redisClient = createClient({ url: process.env.REDIS_URL });
+const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
-redisClient
-  .connect()
-  .then(() => console.log("Conectado a Redis correctamente"))
-  .catch((err) => console.error("Error al conectar Redis:", err));
+const client = createClient({ url: REDIS_URL });
 
-module.exports = redisClient;
+client.on('error', (err) => console.error('🔴  Redis error', err));
+client.on('ready', ()  => console.log('🟢  Redis connected'));
+
+(async () => {
+  try { await client.connect(); }
+  catch (err) { console.error('Redis connect failed', err); }
+})();
+
+module.exports = client;

@@ -1,32 +1,53 @@
-// routes/comparison.js
-const express = require('express');
-const router = express.Router();
-const { getSelectedProducts } = require('../utils/redisClient');
-const { loadExternalData, compararPorTitulo, compararPorEmbeddings } = require('../utils/compararProductos');
+const express     = require('express');
+const fs          = require('fs/promises');
+const path        = require('path');
+const redisClient = require('../utils/redisClient');
+const {
+  compararPorTitulo,
+  compararPorEmbeddings
+} = require('../utils/compararProductos');
 
-// Nuevo endpoint: comparar con datos externos
-router.get('/compare', async (req, res) => {
-  const { shop, mode } = req.query;
-  if (!shop) return res.status(400).json({ error: 'Falta parámetro shop' });
+const router = express.Router();
+
+/** Utilidad local – lee selección almacenada */
+async function getSelectedProducts(shop) {
+  const raw = await redisClient.get(`shop:${shop}:selected_products`);
+  return raw ? JSON.parse(raw) : [];
+}
+
+/** Carga catálogo externo estático (JSON en /external_data) */
+async function loadExternalData(shop) {
+  const file = path.join(__dirname, '..', 'external_data', `${shop}.json`);
+  try {
+    const raw = await fs.readFile(file, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** POST /compare  { shop, mode } */
+router.post('/', async (req, res) => {
+  const { shop, mode = 'title' } = req.body;
+  if (!shop) return res.status(400).json({ error: 'shop requerido' });
+
+  const selected = await getSelectedProducts(shop);
+  if (!selected.length)
+    return res.status(404).json({ error: 'No hay productos seleccionados' });
+
+  const externos = await loadExternalData(shop);
+  if (!externos) return res.status(404).json({ error: 'Sin catálogo externo' });
 
   try {
-    const seleccionados = await getSelectedProducts(shop);
-    const externos = loadExternalData(shop);
+    const resultados =
+      mode === 'semantic'
+        ? await compararPorEmbeddings(selected, externos)
+        : compararPorTitulo(selected, externos);
 
-    if (!externos) {
-      return res.status(404).json({ error: 'No se encontraron datos externos para esta tienda' });
-    }
-
-    if (mode === 'semantic') {
-      const resultado = await compararPorEmbeddings(seleccionados, externos);
-      return res.json({ mode: 'semantic', resultado });
-    } else {
-      const resultado = compararPorTitulo(seleccionados, externos);
-      return res.json({ mode: 'exact', ...resultado });
-    }
+    res.json({ mode, count: resultados.length, resultados });
   } catch (err) {
-    console.error('Error comparando productos:', err);
-    res.status(500).json({ error: 'Error interno al comparar productos.' });
+    console.error(err);
+    res.status(500).json({ error: 'Error comparando productos' });
   }
 });
 

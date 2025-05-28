@@ -1,43 +1,40 @@
-// utils/embeddings.js
-const axios = require('axios');
-const crypto = require('crypto');
+const crypto  = require('crypto');
+const { Configuration, OpenAIApi } = require('openai');
+const redisClient = require('./redisClient');
 const { checkUsageLimit } = require('./usageLimit');
 
-const apiKey = process.env.OPENAI_API_KEY;
-const cache = new Map();
+const openai = new OpenAIApi(
+  new Configuration({ apiKey: process.env.OPENAI_API_KEY })
+);
 
+/* ----------  Helpers  ---------- */
+const cacheKey = (txt) =>
+  'emb:' + crypto.createHash('sha256').update(txt).digest('hex');
+
+/* Obtiene embedding (con caché Redis) */
 async function getEmbedding(text) {
-  if (!apiKey) throw new Error("No hay clave OPENAI_API_KEY configurada");
-  if (await checkUsageLimit()) {
-    throw new Error("🚨 Se ha alcanzado el límite mensual de gasto en la API de OpenAI");
-  }
+  const key = cacheKey(text);
+  const cached = await redisClient.get(key);
+  if (cached) return JSON.parse(cached);
 
-  const hash = crypto.createHash('sha256').update(text).digest('hex');
-  if (cache.has(hash)) return cache.get(hash);
+  await checkUsageLimit(); // lanza error si se supera el límite
 
-  const response = await axios.post(
-    'https://api.openai.com/v1/embeddings',
-    { input: text, model: 'text-embedding-ada-002' },
-    { headers: { Authorization: `Bearer ${apiKey}` } }
-  );
-  const embedding = response.data.data[0].embedding;
-  cache.set(hash, embedding);
-  return embedding;
+  const { data } = await openai.embeddings.create({
+    model: 'text-embedding-3-small',
+    input: text
+  });
+  const vector = data.data[0].embedding;
+
+  await redisClient.set(key, JSON.stringify(vector), { EX: 86400 });
+  return vector;
 }
 
-function cosineSimilarity(vec1, vec2) {
-  const dot = vec1.reduce((sum, v, i) => sum + v * vec2[i], 0);
-  const norm1 = Math.sqrt(vec1.reduce((sum, v) => sum + v * v, 0));
-  const norm2 = Math.sqrt(vec2.reduce((sum, v) => sum + v * v, 0));
-  return dot / (norm1 * norm2);
+/* Similitud coseno entre dos vectores */
+function cosineSimilarity(a, b) {
+  const dot   = a.reduce((s, v, i) => s + v * b[i], 0);
+  const magA  = Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+  const magB  = Math.sqrt(b.reduce((s, v) => s + v * v, 0));
+  return dot / (magA * magB);
 }
 
-async function getCachedEmbedding(text) {
-  const hash = crypto.createHash('sha256').update(text).digest('hex');
-  if (cache.has(hash)) return cache.get(hash);
-  const emb = await getEmbedding(text);
-  cache.set(hash, emb);
-  return emb;
-}
-
-module.exports = { getEmbedding, getCachedEmbedding, cosineSimilarity };
+module.exports = { getEmbedding, cosineSimilarity };

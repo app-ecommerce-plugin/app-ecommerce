@@ -1,24 +1,22 @@
-// utils/usageLimit.js
-const axios = require('axios');
+/**
+ *  ʟɪᴍɪᴛᴀᴅᴏʀ ᴅᴇ ɢᴀsᴛᴏ – simplificado:
+ *  guarda un contador en Redis y evita superar OPENAI_USAGE_LIMIT (USD) al mes.
+ *  Para un control más estricto habría que consultar la API de OpenAI usage.
+ */
+const redisClient = require('./redisClient');
+
+const LIMIT = parseFloat(process.env.OPENAI_USAGE_LIMIT || '10'); // USD
 
 async function checkUsageLimit() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const limit = parseFloat(process.env.OPENAI_USAGE_LIMIT || '10');
-  if (!apiKey) return false; // Si no hay API KEY, no hay control
+  const key = `openai:usage:${new Date().getUTCFullYear()}-${new Date().getUTCMonth()}`;
+  const used = parseFloat(await redisClient.get(key) || '0');
 
-  try {
-    // Consulta oficial de OpenAI para el uso mensual
-    const res = await axios.get('https://api.openai.com/dashboard/billing/usage', {
-      headers: { Authorization: `Bearer ${apiKey}` }
-    });
-    // La respuesta está en centavos de dólar
-    const usage = res.data.total_usage / 100;
-    return usage >= limit;
-  } catch (err) {
-    // Si no se puede consultar, mejor permitir (no bloquear)
-    console.warn("No se pudo verificar el uso actual de OpenAI:", err.message);
-    return false;
+  if (used >= LIMIT) {
+    throw new Error('🚨 Se alcanzó el límite mensual de gasto OpenAI');
   }
+
+  // Simulación rápida: +0.002 USD por embedding
+  await redisClient.set(key, (used + 0.002).toFixed(3));
 }
 
 module.exports = { checkUsageLimit };

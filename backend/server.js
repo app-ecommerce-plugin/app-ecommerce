@@ -1,45 +1,38 @@
-require("dotenv").config();
-const express = require("express");
-const session = require("express-session");
-const cors = require("cors");
-const { RedisStore } = require("connect-redis");
-const redisClient = require("./utils/redisClient");
+require('dotenv').config();
 
-const app = express();
+const express = require('express');
+const cors    = require('cors');
+const session = require('express-session');
+const RedisStore = require('connect-redis').default;
+const redisClient = require('./utils/redisClient');
+
+const app  = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
-app.set("trust proxy", 1);
+/* ----------  MIDDLEWARE  ---------- */
+app.use(cors({
+  origin: process.env.FRONTEND_URL,
+  credentials: true
+}));
+
 app.use(express.json());
+
 app.use(
   session({
     store: new RedisStore({ client: redisClient }),
-    secret: process.env.SESSION_SECRET,
+    secret: process.env.SESSION_SECRET || 'dev-session-secret',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: true, httpOnly: true, maxAge: 86400000 },
+    cookie: { secure: false, httpOnly: true, maxAge: 1000 * 60 * 60 * 24 }
   })
 );
 
-// Routes
-app.use("/shopify", require("./routes/auth"));
-app.use("/shopify", require("./routes/products"));
-app.use("/shopify", require("./routes/selection"));
-app.use("/shopify", require("./routes/comparison"));
-app.use("/debug", require("./routes/debug"));
+/* ----------  ROUTES  ---------- */
+app.use('/shopify',  require('./routes/products'));
+app.use('/compare',  require('./routes/comparison'));
+app.use('/auth',     require('./routes/auth'));   // stub (501)
 
-// Root
-app.get("/", (req, res) => {
-  res.send("Servidor funcionando correctamente en Render");
-});
+/* ----------  DEFAULT ---------- */
+app.get('/', (_, res) => res.json({ ok: true, msg: 'Backend alive' }));
 
-// Start
-app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
-});
-
-// Verificación opcional de presencia de OPENAI_API_KEY
-if (!process.env.OPENAI_API_KEY) {
-  console.warn("⚠️  No se ha definido OPENAI_API_KEY. Las comparaciones semánticas estarán deshabilitadas.");
-}
+app.listen(PORT, () => console.log(`🚀  Server ready on :${PORT}`));
