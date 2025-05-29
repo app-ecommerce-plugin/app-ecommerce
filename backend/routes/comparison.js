@@ -1,65 +1,72 @@
-const express = require("express");
-const fs = require("fs/promises");
-const path = require("path");
-const redisClient = require("../utils/redisClient");
-const {
-  compararPorTitulo,
-  compararPorEmbeddings,
-} = require("../utils/compararProductos");
-
+const express = require('express');
 const router = express.Router();
+const axios = require('axios');
+const redisClient = require('../redisClient');
 
-/** Utilidad local – lee selección almacenada */
-async function getSelectedProducts(shop) {
-  const raw = await redisClient.get(`shop:${shop}:selected_products`);
-  return raw ? JSON.parse(raw) : [];
-}
-
-/** Carga catálogo externo estático (JSON en /external_data) */
-async function loadExternalData(shop) {
-  const file = path.join(__dirname, "..", "external_data", `${shop}.json`);
+// GET /shopify/comparison?mode=title|semantic - Compara productos locales vs Shopify
+router.get('/', async (req, res) => {
+  const mode = req.query.mode || 'title';
   try {
-    const raw = await fs.readFile(file, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
+    // Obtener productos seleccionados almacenados localmente (Redis)
+    const data = await redisClient.get('selectedProducts');
+    const localProducts = data ? JSON.parse(data) : [];
+
+    // Obtener productos de Shopify mediante API
+    let shopDomain = process.env.SHOPIFY_SHOP;
+    let accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const savedShop = await redisClient.get('shopifyShop');
+    if (savedShop) {
+      const savedToken = await redisClient.get(`accessToken_${savedShop}`);
+      if (savedToken) {
+        shopDomain = savedShop;
+        accessToken = savedToken;
+      }
+    }
+    if (!shopDomain || !accessToken) {
+      return res.status(500).json({ error: 'Credenciales de Shopify no disponibles' });
+    }
+    const response = await axios.get(`https://${shopDomain}/admin/api/2023-01/products.json`, {
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json'
+      }
+    });
+    const shopifyProducts = response.data.products || response.data;
+
+    // Comparar según el modo indicado
+    if (mode === 'title') {
+      const matched = [];
+      const notFound = [];
+      localProducts.forEach(localProd => {
+        const localTitle = localProd.title ? localProd.title.trim().toLowerCase() : '';
+        let foundProd = null;
+        if (Array.isArray(shopifyProducts)) {
+          foundProd = shopifyProducts.find(p => p.title && localTitle && p.title.trim().toLowerCase() === localTitle);
+        }
+        if (foundProd) {
+          // Producto encontrado en Shopify: agregar a lista de coincidencias
+          matched.push({ local: localProd, shopify: foundProd });
+        } else {
+          // No encontrado: agregar a lista de no encontrados
+          notFound.push(localProd);
+        }
+      });
+      return res.json({ matched, notFound });
+    } else if (mode === 'semantic') {
+      // Stub para comparación semántica (no implementada)
+      return res.json({
+        matched: [],
+        notFound: [],
+        mensaje: 'Comparación semántica no implementada todavía.'
+      });
+    } else {
+      // Modo no reconocido
+      return res.status(400).json({ error: 'Modo de comparación no válido. Use "title" o "semantic".' });
+    }
+  } catch (error) {
+    console.error('Error en la comparación de productos:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Error al comparar los productos' });
   }
-}
-
-/** ---------- utilidades internas y requires previos ---------- */
-// … (todo lo que ya tenías arriba se mantiene igual)
-
-/* ----------  HANDLER ÚNICO  ---------- */
-async function handleCompare(req, res) {
-  const { shop, mode = "title" } = req.method === "GET" ? req.query : req.body;
-
-  if (!shop) return res.status(400).json({ error: "shop requerido" });
-
-  const selected = await getSelectedProducts(shop);
-  if (!selected.length)
-    return res.status(404).json({ error: "No hay productos seleccionados" });
-
-  const externos = await loadExternalData(shop);
-  if (!externos) return res.status(404).json({ error: "Sin catálogo externo" });
-
-  try {
-    const resultados =
-      mode === "semantic"
-        ? await compararPorEmbeddings(selected, externos)
-        : compararPorTitulo(selected, externos);
-
-    res.json({ mode, count: resultados.length, resultados });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Error comparando productos" });
-  }
-}
-
-/* ----------  ENDPOINTS  ---------- */
-//  POST /shopify/compare  ─ guarda o compara vía cuerpo JSON
-router.post("/compare", handleCompare);
-
-//  GET  /shopify/compare?shop=<tienda>&mode=semantic
-router.get("/compare", handleCompare);
+});
 
 module.exports = router;

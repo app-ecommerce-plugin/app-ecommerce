@@ -1,77 +1,71 @@
-const express     = require('express');
-const axios       = require('axios');
-const path        = require('path');
-const fs          = require('fs/promises');
-const redisClient = require('../utils/redisClient');
-
+const express = require('express');
 const router = express.Router();
+const axios = require('axios');
+const redisClient = require('../redisClient');
 
-/* ----------  Selección de productos ---------- */
-
-/** Guarda IDs de productos seleccionados para la tienda */
-router.post('/selected', async (req, res) => {
-  const { shop, selectedProducts } = req.body;
-  if (!shop || !Array.isArray(selectedProducts)) {
-    return res
-      .status(400)
-      .json({ error: 'shop y selectedProducts requeridos' });
-  }
-
-  await redisClient.set(
-    `shop:${shop}:selected_products`,
-    JSON.stringify(selectedProducts),
-    { EX: 86400 }
-  );
-
-  res.json({ ok: true, saved: selectedProducts.length });
-});
-
-/** Recupera la selección actual */
-router.get('/selected', async (req, res) => {
-  const { shop } = req.query;
-  if (!shop) return res.status(400).json({ error: 'shop requerido' });
-
-  const data = await redisClient.get(`shop:${shop}:selected_products`);
-  res.json({ selectedProducts: data ? JSON.parse(data) : [] });
-});
-
-/* ----------  Listado de productos ---------- */
-/**
- * GET /shopify/products
- * Si envías cabecera  X-Shopify-Token  ➜ consulta la API real de Shopify.
- * Si NO envías token (modo demo)       ➜ lee external_data/<shop>.json
- */
-router.get('/products', async (req, res) => {
-  const { shop } = req.query;
-  const token    = req.headers['x-shopify-token'];
-
-  if (!shop) return res.status(400).json({ error: 'shop requerido' });
-
-  /* --- Modo producción: consulta Shopify --- */
-  if (token) {
-    try {
-      const url = `https://${shop}/admin/api/2024-01/products.json?limit=250`;
-      const { data } = await axios.get(url, {
-        headers: { 'X-Shopify-Access-Token': token }
-      });
-      return res.json(data.products || data); // según versión de API
-    } catch (err) {
-      console.error(err.response?.data || err.message);
-      return res
-        .status(502)
-        .json({ error: 'Error consultando Shopify', details: err.message });
-    }
-  }
-
-  /* --- Modo desarrollo/demo: lee JSON local --- */
+// GET /shopify/products - Obtiene la lista de productos desde Shopify
+router.get('/', async (req, res) => {
   try {
-    const file = path.join(__dirname, '..', 'external_data', `${shop}.json`);
-    const raw  = await fs.readFile(file, 'utf8');
-    return res.json(JSON.parse(raw));
-  } catch {
-    return res
-      .status(404)
-      .json({ error: 'Catálogo no encontrado para esta tienda' });
+    // Determinar dominio de la tienda y token de acceso
+    let shopDomain = process.env.SHOPIFY_SHOP;
+    let accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const savedShop = await redisClient.get('shopifyShop');
+    if (savedShop) {
+      const savedToken = await redisClient.get(`accessToken_${savedShop}`);
+      if (savedToken) {
+        shopDomain = savedShop;
+        accessToken = savedToken;
+      }
+    }
+
+    // Verificar credenciales disponibles
+    if (!shopDomain || !accessToken) {
+      return res.status(500).json({ error: 'Credenciales de Shopify no disponibles' });
+    }
+
+    // Llamar a la API de Shopify para obtener productos
+    const response = await axios.get(`https://${shopDomain}/admin/api/2023-01/products.json`, {
+      headers: {
+        'X-Shopify-Access-Token': accessToken,
+        'Content-Type': 'application/json'
+      }
+    });
+    const products = response.data.products || response.data;
+    res.json(products);
+  } catch (error) {
+    console.error('Error al obtener productos de Shopify:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Error al obtener productos desde Shopify' });
+  }
+});
+
+// POST /shopify/products/selected - Guarda en Redis los productos seleccionados por el usuario
+router.post('/selected', async (req, res) => {
+  try {
+    const selectedProducts = req.body;
+    if (!selectedProducts) {
+      return res.status(400).json({ error: 'No se proporcionaron productos para guardar' });
+    }
+    // Almacenar la lista de productos seleccionados en Redis
+    await redisClient.set('selectedProducts', JSON.stringify(selectedProducts));
+    res.status(200).json({ message: 'Productos seleccionados guardados correctamente.' });
+  } catch (error) {
+    console.error('Error al guardar productos seleccionados:', error);
+    res.status(500).json({ error: 'No se pudieron guardar los productos seleccionados' });
+  }
+});
+
+// GET /shopify/products/selected - Recupera de Redis los productos seleccionados guardados
+router.get('/selected', async (req, res) => {
+  try {
+    const data = await redisClient.get('selectedProducts');
+    if (!data) {
+      return res.json([]);  // Si no hay nada guardado, devolver lista vacía
+    }
+    const selectedProducts = JSON.parse(data);
+    res.json(selectedProducts);
+  } catch (error) {
+    console.error('Error al obtener productos seleccionados:', error);
+    res.status(500).json({ error: 'No se pudieron obtener los productos seleccionados' });
   }
 });
 
