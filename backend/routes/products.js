@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const redisClient = require('../redisClient');
+const redisClient = require('../utils/redisClient');
 
 // GET /shopify/products - Obtiene la lista de productos desde Shopify
 router.get('/', async (req, res) => {

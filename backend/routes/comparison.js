@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const redisClient = require('../redisClient');
+const redisClient = require('../utils/redisClient');
 
 // GET /shopify/comparison?mode=title|semantic - Compara productos locales vs Shopify
 router.get('/', async (req, res) => {

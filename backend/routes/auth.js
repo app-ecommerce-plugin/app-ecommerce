@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const crypto = require('crypto');
-const redisClient = require('../redisClient');
+const redisClient = require('../utils/redisClient');
 
 // Función auxiliar para verificar HMAC de la petición de callback (seguridad de Shopify)
 function verifyHmac(query) {
