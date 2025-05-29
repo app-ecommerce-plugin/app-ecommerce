@@ -1,18 +1,36 @@
 const { getEmbedding, cosineSimilarity } = require('./embeddings');
 
-/** 1. Comparación simple por coincidencia en título */
+/**
+ * Comparación básica:
+ *   1. Intenta emparejar por ID (más fiable).
+ *   2. Si no coincide por ID, compara el título (case-insensitive).
+ *   Ignora entradas que no tengan título o id.
+ */
 function compararPorTitulo(productosTienda, productosExternos) {
   const resultados = [];
 
   productosTienda.forEach((p) => {
-    const match = productosExternos.find((e) =>
-      e.title.toLowerCase() === p.title.toLowerCase()
-    );
+    if (!p) return; // seguridad contra null/undefined
+
+    let match = null;
+
+    // ─ Emparejar por ID ─
+    if (p.id !== undefined) {
+      match = productosExternos.find((e) => e.id === p.id);
+    }
+
+    // ─ Emparejar por título ─
+    if (!match && p.title) {
+      match = productosExternos.find(
+        (e) => e.title && e.title.toLowerCase() === p.title.toLowerCase()
+      );
+    }
+
     if (match) {
       resultados.push({
         tienda: p,
         externo: match,
-        diferenciaPrecio: p.price - match.price,
+        diferenciaPrecio: (p.price ?? 0) - (match.price ?? 0),
         metodo: 'title'
       });
     }
@@ -20,6 +38,7 @@ function compararPorTitulo(productosTienda, productosExternos) {
 
   return resultados;
 }
+
 
 /** 2. Comparación semántica con embeddings */
 async function compararPorEmbeddings(productosTienda, productosExternos) {
