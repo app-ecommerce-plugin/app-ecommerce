@@ -11,7 +11,7 @@ function SelectedProducts() {
   useEffect(() => {
     const fetchSelected = async () => {
       try {
-        const res = await fetch(`${API_URL}/shopify/selected-products?shop=${shopParam}`, {
+        const res = await fetch(`${API_URL}/shopify/products/selected-products?shop=${shopParam}`, {
           credentials: 'include',
         });
         const data = await res.json();

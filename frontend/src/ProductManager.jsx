@@ -23,7 +23,7 @@ function ProductManager({ apiUrl, shop }) {
       .catch(console.error);
 
     // Obtener productos seleccionados
-    fetch(`${apiUrl}/shopify/selected?shop=${shop}`)
+    fetch(`${apiUrl}/shopify/products/selected?shop=${shop}`)
       .then((res) => res.json())
       .then((data) => setSelected(data.selectedProducts || []))
       .catch(console.warn);
@@ -37,7 +37,7 @@ function ProductManager({ apiUrl, shop }) {
   };
 
   const saveSelection = () => {
-    fetch(`${apiUrl}/shopify/selected`, {
+    fetch(`${apiUrl}/shopify/products/selected`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shop, selectedProducts: selected }),
