@@ -1,11 +1,11 @@
-const express     = require('express');
-const fs          = require('fs/promises');
-const path        = require('path');
-const redisClient = require('../utils/redisClient');
+const express = require("express");
+const fs = require("fs/promises");
+const path = require("path");
+const redisClient = require("../utils/redisClient");
 const {
   compararPorTitulo,
-  compararPorEmbeddings
-} = require('../utils/compararProductos');
+  compararPorEmbeddings,
+} = require("../utils/compararProductos");
 
 const router = express.Router();
 
@@ -17,38 +17,49 @@ async function getSelectedProducts(shop) {
 
 /** Carga catálogo externo estático (JSON en /external_data) */
 async function loadExternalData(shop) {
-  const file = path.join(__dirname, '..', 'external_data', `${shop}.json`);
+  const file = path.join(__dirname, "..", "external_data", `${shop}.json`);
   try {
-    const raw = await fs.readFile(file, 'utf8');
+    const raw = await fs.readFile(file, "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 
-/** POST /compare  { shop, mode } */
-router.post('/', async (req, res) => {
-  const { shop, mode = 'title' } = req.body;
-  if (!shop) return res.status(400).json({ error: 'shop requerido' });
+/** ---------- utilidades internas y requires previos ---------- */
+// … (todo lo que ya tenías arriba se mantiene igual)
+
+/* ----------  HANDLER ÚNICO  ---------- */
+async function handleCompare(req, res) {
+  const { shop, mode = "title" } = req.method === "GET" ? req.query : req.body;
+
+  if (!shop) return res.status(400).json({ error: "shop requerido" });
 
   const selected = await getSelectedProducts(shop);
   if (!selected.length)
-    return res.status(404).json({ error: 'No hay productos seleccionados' });
+    return res.status(404).json({ error: "No hay productos seleccionados" });
 
   const externos = await loadExternalData(shop);
-  if (!externos) return res.status(404).json({ error: 'Sin catálogo externo' });
+  if (!externos) return res.status(404).json({ error: "Sin catálogo externo" });
 
   try {
     const resultados =
-      mode === 'semantic'
+      mode === "semantic"
         ? await compararPorEmbeddings(selected, externos)
         : compararPorTitulo(selected, externos);
 
     res.json({ mode, count: resultados.length, resultados });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Error comparando productos' });
+    res.status(500).json({ error: "Error comparando productos" });
   }
-});
+}
+
+/* ----------  ENDPOINTS  ---------- */
+//  POST /shopify/compare  ─ guarda o compara vía cuerpo JSON
+router.post("/compare", handleCompare);
+
+//  GET  /shopify/compare?shop=<tienda>&mode=semantic
+router.get("/compare", handleCompare);
 
 module.exports = router;
