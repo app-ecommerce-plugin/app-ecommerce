@@ -55,8 +55,7 @@ function ProductManager({ apiUrl, shop }) {
     if (!tiendaReferencia) return;
 
     fetch(
-      `${apiUrl}/shopify/compare?shop1=${shop}&shop2=${tiendaReferencia}.myshopify.com`
-    )
+      `${apiUrl}/shopify/compare?shop=${shop}&otherShop=${tiendaReferencia}.myshopify.com&mode=title`)
       .then((res) => res.json())
       .then((data) => {
         if (data.comparaciones && data.comparaciones.length > 0) {

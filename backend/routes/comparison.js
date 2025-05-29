@@ -2,70 +2,40 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const redisClient = require('../utils/redisClient');
+const { loadExternalData, compararPorTitulo, compararPorEmbeddings } = require('../utils/compararProductos');
 
-// GET /shopify/comparison?mode=title|semantic - Compara productos locales vs Shopify
+// GET /shopify/compare?shop={shop}&otherShop={otherShop}&mode=title|semantic
 router.get('/', async (req, res) => {
-  const mode = req.query.mode || 'title';
-  try {
-    // Obtener productos seleccionados almacenados localmente (Redis)
-    const data = await redisClient.get('selectedProducts');
-    const localProducts = data ? JSON.parse(data) : [];
+  const { shop, otherShop, mode = 'title' } = req.query;
 
-    // Obtener productos de Shopify mediante API
-    let shopDomain = process.env.SHOPIFY_SHOP;
-    let accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
-    const savedShop = await redisClient.get('shopifyShop');
-    if (savedShop) {
-      const savedToken = await redisClient.get(`accessToken_${savedShop}`);
-      if (savedToken) {
-        shopDomain = savedShop;
-        accessToken = savedToken;
-      }
+  if (!shop || !otherShop) {
+    return res.status(400).json({ error: 'Se requieren los parámetros "shop" y "otherShop".' });
+  }
+
+  try {
+    // Recupera productos seleccionados de la tienda actual desde Redis
+    const data = await redisClient.get(`shop:${shop}:selected_products`);
+    const selectedProducts = data ? JSON.parse(data) : [];
+
+    if (!selectedProducts.length) {
+      return res.status(404).json({ error: 'No hay productos seleccionados para la tienda especificada.' });
     }
-    if (!shopDomain || !accessToken) {
-      return res.status(500).json({ error: 'Credenciales de Shopify no disponibles' });
+
+    // Productos externos desde archivo JSON (tienda secundaria)
+    const externalProducts = await loadExternalData(otherShop);
+    if (!externalProducts) {
+      return res.status(404).json({ error: 'No se encontraron datos externos para la tienda especificada.' });
     }
-    const response = await axios.get(`https://${shopDomain}/admin/api/2023-01/products.json`, {
-      headers: {
-        'X-Shopify-Access-Token': accessToken,
-        'Content-Type': 'application/json'
-      }
-    });
-    const shopifyProducts = response.data.products || response.data;
 
     // Comparar según el modo indicado
-    if (mode === 'title') {
-      const matched = [];
-      const notFound = [];
-      localProducts.forEach(localProd => {
-        const localTitle = localProd.title ? localProd.title.trim().toLowerCase() : '';
-        let foundProd = null;
-        if (Array.isArray(shopifyProducts)) {
-          foundProd = shopifyProducts.find(p => p.title && localTitle && p.title.trim().toLowerCase() === localTitle);
-        }
-        if (foundProd) {
-          // Producto encontrado en Shopify: agregar a lista de coincidencias
-          matched.push({ local: localProd, shopify: foundProd });
-        } else {
-          // No encontrado: agregar a lista de no encontrados
-          notFound.push(localProd);
-        }
-      });
-      return res.json({ matched, notFound });
-    } else if (mode === 'semantic') {
-      // Stub para comparación semántica (no implementada)
-      return res.json({
-        matched: [],
-        notFound: [],
-        mensaje: 'Comparación semántica no implementada todavía.'
-      });
-    } else {
-      // Modo no reconocido
-      return res.status(400).json({ error: 'Modo de comparación no válido. Use "title" o "semantic".' });
-    }
+    const resultados = mode === 'semantic'
+      ? await compararPorEmbeddings(selectedProducts, externalProducts) // stub preparado
+      : compararPorTitulo(selectedProducts, externalProducts);
+
+    res.json({ mode, count: resultados.length, resultados });
   } catch (error) {
-    console.error('Error en la comparación de productos:', error.response?.data || error.message);
-    res.status(500).json({ error: 'Error al comparar los productos' });
+    console.error('Error al comparar productos:', error);
+    res.status(500).json({ error: 'Error interno al comparar productos' });
   }
 });
 
