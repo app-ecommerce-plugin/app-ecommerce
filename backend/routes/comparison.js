@@ -1,54 +1,78 @@
+
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
+const redisClient = require('../utils/redisClient');
 const fs = require('fs');
 const path = require('path');
-const redisClient = require('../utils/redisClient');
 
-// GET /shopify/compare?shop=...&otherShop=...&mode=title|semantic
+// GET /shopify/compare?mode=title&shop=example.myshopify.com
 router.get('/', async (req, res) => {
-  const { shop, otherShop, mode = 'title' } = req.query;
-  if (!shop || !otherShop) {
-    return res.status(400).json({ error: 'Faltan parámetros "shop" y/o "otherShop".' });
-  }
+  const mode = req.query.mode || 'title';
+  const shop = req.query.shop;
 
   try {
-    const selectedStr = await redisClient.get(`shop:${shop}:selected_products`);
-    const selected = selectedStr ? JSON.parse(selectedStr) : [];
-
-    const otherPath = path.join(__dirname, '..', 'external_data', `${otherShop}.json`);
-    if (!fs.existsSync(otherPath)) {
-      return res.status(404).json({ error: `Archivo de tienda no encontrado: ${otherShop}.json` });
+    if (!shop) {
+      return res.status(400).json({ error: 'Falta el parámetro shop' });
     }
 
-    const rawOther = fs.readFileSync(otherPath);
-    const otherProducts = JSON.parse(rawOther).products || [];
+    // Obtener productos seleccionados desde Redis
+    const selectedData = await redisClient.get('selectedProducts');
+    const localProducts = selectedData ? JSON.parse(selectedData) : [];
 
-    if (mode === 'title') {
-      const matched = [];
-      const notFound = [];
+    // Determinar si hay credenciales de Shopify disponibles
+    let shopDomain = process.env.SHOPIFY_SHOP;
+    let accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
 
-      selected.forEach(localProd => {
-        const match = otherProducts.find(p => p.title.trim().toLowerCase() === localProd.title.trim().toLowerCase());
-        if (match) {
-          matched.push({ local: localProd, remote: match });
-        } else {
-          notFound.push(localProd);
+    const savedShop = await redisClient.get('shopifyShop');
+    if (savedShop) {
+      const savedToken = await redisClient.get(`accessToken_${savedShop}`);
+      if (savedToken) {
+        shopDomain = savedShop;
+        accessToken = savedToken;
+      }
+    }
+
+    let shopifyProducts = [];
+
+    if (accessToken && shopDomain) {
+      // Modo real: cargar desde Shopify API
+      const response = await axios.get(`https://${shopDomain}/admin/api/2023-01/products.json`, {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
         }
       });
-
-      res.json({ matched, notFound });
-    } else if (mode === 'semantic') {
-      res.json({
-        matched: [],
-        notFound: selected,
-        message: 'Comparación semántica aún no implementada.'
-      });
+      shopifyProducts = response.data.products || [];
     } else {
-      res.status(400).json({ error: 'Modo inválido: usar "title" o "semantic".' });
+      // Modo local: cargar desde archivo backend/external_data/<shop>.json
+      const filePath = path.resolve(__dirname, `../external_data/${shop}.json`);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: `Archivo local no encontrado para ${shop}` });
+      }
+      const raw = fs.readFileSync(filePath, 'utf8');
+      shopifyProducts = JSON.parse(raw);
     }
-  } catch (err) {
-    console.error('Error en comparación:', err);
-    res.status(500).json({ error: 'Error interno en comparación de productos.' });
+
+    // Comparación simple por título
+    const matched = [];
+    const notFound = [];
+
+    localProducts.forEach(localProd => {
+      const localTitle = localProd.title?.trim().toLowerCase();
+      const found = shopifyProducts.find(p => p.title?.trim().toLowerCase() === localTitle);
+      if (found) {
+        matched.push({ local: localProd, shopify: found });
+      } else {
+        notFound.push(localProd);
+      }
+    });
+
+    res.json({ matched, notFound });
+
+  } catch (error) {
+    console.error('Error en comparación:', error.message || error);
+    res.status(500).json({ error: 'Error al comparar productos' });
   }
 });
 
