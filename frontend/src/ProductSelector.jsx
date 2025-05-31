@@ -27,7 +27,7 @@ function ProductSelector() {
 
   const guardar = async () => {
     try {
-      const res = await fetch(`${API_URL}/shopify/seleted`, {
+      const res = await fetch(`${API_URL}/shopify/selected`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
