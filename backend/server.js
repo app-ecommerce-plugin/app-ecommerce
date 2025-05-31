@@ -1,4 +1,4 @@
-require('dotenv').config();  // Carga variables de entorno desde .env si existe
+require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
@@ -10,22 +10,21 @@ const authRoutes = require('./routes/auth');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware de CORS y parsing de JSON
-app.use(cors());  // Permite peticiones de cualquier origen (ajustable según dominio del frontend)
+// Middleware
+app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));  // (Opcional) parsea formularios URL-encoded
+app.use(express.urlencoded({ extended: true }));
 
-// Montar rutas bajo el prefijo /shopify
+// Rutas
 app.use('/shopify/products', productsRoutes);
 app.use('/shopify/comparison', comparisonRoutes);
 app.use('/shopify/auth', authRoutes);
 
-// Ruta base (opcional) para verificar funcionamiento
+// Ruta base
 app.get('/', (req, res) => {
   res.send('Backend de Shopify activo');
 });
 
-// Iniciar servidor
 app.listen(PORT, () => {
   console.log(`Servidor iniciado en puerto ${PORT}`);
 });
