@@ -1,42 +1,54 @@
-//backend/routes/comparison.js
 const express = require('express');
 const router = express.Router();
-const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const redisClient = require('../utils/redisClient');
-const { loadExternalData, compararPorTitulo, compararPorEmbeddings } = require('../utils/compararProductos');
 
-// GET /shopify/compare?shop={shop}&otherShop={otherShop}&mode=title|semantic
+// GET /shopify/compare?shop=...&otherShop=...&mode=title|semantic
 router.get('/', async (req, res) => {
   const { shop, otherShop, mode = 'title' } = req.query;
-
   if (!shop || !otherShop) {
-    return res.status(400).json({ error: 'Se requieren los parámetros "shop" y "otherShop".' });
+    return res.status(400).json({ error: 'Faltan parámetros "shop" y/o "otherShop".' });
   }
 
   try {
-    // Recupera productos seleccionados de la tienda actual desde Redis
-    const data = await redisClient.get(`shop:${shop}:selected_products`);
-    const selectedProducts = data ? JSON.parse(data) : [];
+    const selectedStr = await redisClient.get(`shop:${shop}:selected_products`);
+    const selected = selectedStr ? JSON.parse(selectedStr) : [];
 
-    if (!selectedProducts.length) {
-      return res.status(404).json({ error: 'No hay productos seleccionados para la tienda especificada.' });
+    const otherPath = path.join(__dirname, '..', 'external_data', `${otherShop}.json`);
+    if (!fs.existsSync(otherPath)) {
+      return res.status(404).json({ error: `Archivo de tienda no encontrado: ${otherShop}.json` });
     }
 
-    // Productos externos desde archivo JSON (tienda secundaria)
-    const externalProducts = await loadExternalData(otherShop);
-    if (!externalProducts) {
-      return res.status(404).json({ error: 'No se encontraron datos externos para la tienda especificada.' });
+    const rawOther = fs.readFileSync(otherPath);
+    const otherProducts = JSON.parse(rawOther).products || [];
+
+    if (mode === 'title') {
+      const matched = [];
+      const notFound = [];
+
+      selected.forEach(localProd => {
+        const match = otherProducts.find(p => p.title.trim().toLowerCase() === localProd.title.trim().toLowerCase());
+        if (match) {
+          matched.push({ local: localProd, remote: match });
+        } else {
+          notFound.push(localProd);
+        }
+      });
+
+      res.json({ matched, notFound });
+    } else if (mode === 'semantic') {
+      res.json({
+        matched: [],
+        notFound: selected,
+        message: 'Comparación semántica aún no implementada.'
+      });
+    } else {
+      res.status(400).json({ error: 'Modo inválido: usar "title" o "semantic".' });
     }
-
-    // Comparar según el modo indicado
-    const resultados = mode === 'semantic'
-      ? await compararPorEmbeddings(selectedProducts, externalProducts) // stub preparado
-      : compararPorTitulo(selectedProducts, externalProducts);
-
-    res.json({ mode, count: resultados.length, resultados });
-  } catch (error) {
-    console.error('Error al comparar productos:', error);
-    res.status(500).json({ error: 'Error interno al comparar productos' });
+  } catch (err) {
+    console.error('Error en comparación:', err);
+    res.status(500).json({ error: 'Error interno en comparación de productos.' });
   }
 });
 
