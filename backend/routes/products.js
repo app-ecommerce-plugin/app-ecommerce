@@ -1,78 +1,37 @@
-
 const express = require('express');
 const router = express.Router();
-const redisClient = require('../utils/redisClient');
-const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
+const redisClient = require('../utils/redisClient');
+const fs = require('fs/promises');
+const path = require('path');
 
-// GET /shopify/products?shop=example.myshopify.com
+// GET /shopify/products?shop=... - Devuelve productos desde Shopify o JSON local
 router.get('/', async (req, res) => {
   const shop = req.query.shop;
-
-  if (!shop) {
-    return res.status(400).json({ error: 'Falta el parámetro shop' });
-  }
+  if (!shop) return res.status(400).json({ error: 'Falta parámetro shop' });
 
   try {
-    let shopDomain = process.env.SHOPIFY_SHOP;
-    let accessToken = process.env.SHOPIFY_ACCESS_TOKEN;
+    const savedToken = await redisClient.get(`accessToken_${shop}`);
+    const shopDomain = shop;
 
-    const savedShop = await redisClient.get('shopifyShop');
-    if (savedShop) {
-      const savedToken = await redisClient.get(`accessToken_${savedShop}`);
-      if (savedToken) {
-        shopDomain = savedShop;
-        accessToken = savedToken;
-      }
-    }
-
-    let products = [];
-
-    if (accessToken && shopDomain) {
+    if (savedToken) {
       const response = await axios.get(`https://${shopDomain}/admin/api/2023-01/products.json`, {
         headers: {
-          'X-Shopify-Access-Token': accessToken,
+          'X-Shopify-Access-Token': savedToken,
           'Content-Type': 'application/json'
         }
       });
-      products = response.data.products || [];
+      return res.json(response.data.products || []);
     } else {
-      const filePath = path.resolve(__dirname, `../external_data/${shop}.json`);
-      if (!fs.existsSync(filePath)) {
-        return res.status(404).json({ error: `Archivo local no encontrado para ${shop}` });
-      }
-      const raw = fs.readFileSync(filePath, 'utf8');
-      products = JSON.parse(raw);
+      // Leer productos desde JSON local en backend/external_data/[shop].json
+      const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
+      const content = await fs.readFile(filePath, 'utf-8');
+      const products = JSON.parse(content);
+      return res.json(products);
     }
-
-    res.json(products);
-  } catch (err) {
-    console.error('Error al obtener productos:', err.message);
-    res.status(500).json({ error: 'No se pudieron obtener los productos' });
-  }
-});
-
-// POST /shopify/products/selected
-router.post('/selected', async (req, res) => {
-  try {
-    await redisClient.set('selectedProducts', JSON.stringify(req.body));
-    res.json({ message: 'Selección guardada en Redis' });
-  } catch (err) {
-    console.error('Error al guardar selección:', err.message);
-    res.status(500).json({ error: 'No se pudo guardar la selección' });
-  }
-});
-
-// GET /shopify/products/selected
-router.get('/selected', async (req, res) => {
-  try {
-    const data = await redisClient.get('selectedProducts');
-    const selected = data ? JSON.parse(data) : [];
-    res.json(selected);
-  } catch (err) {
-    console.error('Error al obtener selección:', err.message);
-    res.status(500).json({ error: 'No se pudo recuperar la selección' });
+  } catch (error) {
+    console.error('Error al obtener productos:', error.message);
+    return res.status(500).json({ error: 'No se pudieron obtener productos' });
   }
 });
 
