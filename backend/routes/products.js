@@ -69,7 +69,7 @@ router.post("/selected", async (req, res) => {
 
   try {
     // 1. Leemos todos los productos del JSON fijo que está en el repo
-    const filePath = path.join(__dirname, "..", "external_data", shop);
+    const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
     const content = await fs.readFile(filePath, "utf-8");
     const data = JSON.parse(content);
     const allProds = data.products || [];
