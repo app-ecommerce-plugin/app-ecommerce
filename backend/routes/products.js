@@ -62,8 +62,8 @@ router.post("/selected", async (req, res) => {
   }
 
   try {
-    const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
-    //const filePath = path.join(__dirname, "..", "external_data", shop);
+    //const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
+    const filePath = path.join(__dirname, "..", "external_data", shop);
     const content = await fs.readFile(filePath, "utf-8");
     const data = JSON.parse(content);
     const allProducts = data.products || [];
