@@ -26,7 +26,12 @@ router.get("/", async (req, res) => {
       );
       return res.json({ products: response.data.products || [] });
     } else {
-      const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
+      const filePath = path.join(
+        __dirname,
+        "..",
+        "external_data",
+        `${shop}.json`
+      );
       const content = await fs.readFile(filePath, "utf-8");
       const data = JSON.parse(content);
       return res.json({ products: data.products || [] });
@@ -39,48 +44,50 @@ router.get("/", async (req, res) => {
 
 // GET /shopify/products/selected?shop=...
 router.get("/selected", async (req, res) => {
-  const shop = req.query.shop;
+  const { shop } = req.query;
   if (!shop) return res.status(400).json({ error: "Falta parámetro shop" });
 
   try {
-    const redisKey = `selectedProducts_${shop}`;
-    const selected = await redisClient.get(redisKey);
-    const selectedProducts = selected ? JSON.parse(selected) : [];
-    return res.json({ selectedProducts });
+    const key = `selectedProducts_${shop}`;
+    const raw = await redisClient.get(key);
+    const selected = raw ? JSON.parse(raw) : [];
+    return res.json({ selectedProducts: selected });
   } catch (err) {
-    console.error("Error al leer productos seleccionados:", err.message);
-    return res.status(500).json({ error: "No se pudo leer datos de Redis" });
+    console.error("Error al leer selección:", err.message);
+    return res.status(500).json({ error: "No se pudo leer la selección" });
   }
 });
 
 // POST /shopify/products/selected
 router.post("/selected", async (req, res) => {
-  const { shop, selectedProducts } = req.body;
+  const { shop, selectedProducts } = req.body; // selectedProducts = [1,3,…]
 
   if (!shop || !Array.isArray(selectedProducts)) {
     return res.status(400).json({ error: "Parámetros inválidos" });
   }
 
   try {
-    //const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
+    // 1. Leemos todos los productos del JSON fijo que está en el repo
     const filePath = path.join(__dirname, "..", "external_data", shop);
     const content = await fs.readFile(filePath, "utf-8");
     const data = JSON.parse(content);
-    const allProducts = data.products || [];
+    const allProds = data.products || [];
 
+    // 2. Enriquecemos: de cada ID obtenemos su título
     const enriched = selectedProducts
       .map((id) => {
-        const found = allProducts.find((p) => p.id === id);
-        return found ? { id: found.id, title: found.title } : null;
+        const p = allProds.find((pr) => pr.id === id);
+        return p ? { id: p.id, title: p.title } : null;
       })
-      .filter(Boolean);
+      .filter(Boolean); // quita posibles null si un id no existe
 
-    const redisKey = `selectedProducts_${shop}`;
-    await redisClient.set(redisKey, JSON.stringify(enriched));
+    // 3. Guardamos SOLO en Redis (no escribimos disco en Render)
+    await redisClient.set(`selectedProducts_${shop}`, JSON.stringify(enriched));
 
+    // 4. Respondemos OK
     return res.json({ success: true });
   } catch (err) {
-    console.error("Error al guardar productos seleccionados:", err.message);
+    console.error("Error al guardar selección:", err.message);
     return res.status(500).json({ error: "No se pudo guardar la selección" });
   }
 });
