@@ -23,13 +23,13 @@ function ProductManager({ apiUrl, shop }) {
       .catch(console.error);
 
     // Obtener productos seleccionados
-    fetch(`${apiUrl}/shopify/products/selected?shop=${shop}`).then((res) =>
-      res.json()
-    );
-    then((data) => {
-      const ids = (data.selectedProducts || []).map((p) => p.id ?? p); // acepta objetos o números
-      setSelected(ids);
-    }).catch(console.warn);
+    fetch(`${apiUrl}/shopify/products/selected?shop=${shop}`)
+      .then((res) => res.json())
+      .then((data) => {
+        const ids = (data.selectedProducts || []).map((p) => p.id ?? p);
+        setSelected(ids);
+      })
+      .catch(console.warn);
   }, [apiUrl, shop]);
 
   const toggleSelection = (productId) => {
