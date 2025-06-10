@@ -1,4 +1,5 @@
-[
+{
+  "products":[
     {
       "title": "Crema De Día Colágeno Marino Spf50 50ml",
       "price": 24.99,
@@ -21,3 +22,4 @@
       "currency": "EUR"
     }
   ]
+}

@@ -1,5 +1,7 @@
-[
+{
+  "products": [
     {
+      "id": 1,
       "title": "Samsung TV Neo QLED 4K 75\" TQ75QN85DBTXXC",
       "price": 1189.15,
       "source": "El Corte Inglés",
@@ -7,6 +9,7 @@
       "currency": "EUR"
     },
     {
+      "id": 2,
       "title": "Cámara compacta Nikon Coolpix P1100",
       "price": 1349,
       "source": "El Corte Inglés",
@@ -14,10 +17,13 @@
       "currency": "EUR"
     },
     {
-      "title": "Horno multifunción AEG pirolitico",
+      "id": 3,
+      "title": "Horno multifunción AEG pirolítico",
       "price": 469,
       "source": "El Corte Inglés",
       "url": "https://www.elcorteingles.es/...",
       "currency": "EUR"
     }
-  ]
+  ],
+  "selectedProducts": [1, 3]
+}
