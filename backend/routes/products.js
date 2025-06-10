@@ -82,19 +82,14 @@ router.post("/selected", async (req, res) => {
     const data = JSON.parse(content);
     const allProducts = data.products || [];
 
-    // Buscar títulos a partir de los IDs seleccionados
     const enriched = selectedProducts
       .map((id) => {
         const found = allProducts.find((p) => p.id === id);
         return found ? { id: found.id, title: found.title } : null;
       })
-      .filter(Boolean); // elimina nulls si no se encontró algún ID
+      .filter(Boolean);
 
-    // Guardar en archivo local
-    data.selectedProducts = enriched;
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
-
-    // Guardar también en Redis
+    // Guardar en Redis
     const redisKey = `selectedProducts_${shop}`;
     await redisClient.set(redisKey, JSON.stringify(enriched));
 
