@@ -23,7 +23,6 @@ router.get('/', async (req, res) => {
       });
       return res.json(response.data.products || []);
     } else {
-      // Leer productos desde JSON local en backend/external_data/[shop].json
       const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
       const content = await fs.readFile(filePath, 'utf-8');
       const products = JSON.parse(content);
@@ -32,6 +31,44 @@ router.get('/', async (req, res) => {
   } catch (error) {
     console.error('Error al obtener productos:', error.message);
     return res.status(500).json({ error: 'No se pudieron obtener productos' });
+  }
+});
+
+// GET /shopify/products/selected?shop=... - Devuelve productos seleccionados
+router.get('/selected', async (req, res) => {
+  const shop = req.query.shop;
+  if (!shop) return res.status(400).json({ error: 'Falta parámetro shop' });
+
+  try {
+    const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
+    const content = await fs.readFile(filePath, 'utf-8');
+    const data = JSON.parse(content);
+    return res.json({ selectedProducts: data.selectedProducts || [] });
+  } catch (err) {
+    console.error('Error al leer productos seleccionados:', err.message);
+    return res.status(404).json({ error: 'No se pudo leer el archivo local' });
+  }
+});
+
+// POST /shopify/products/selected - Guarda productos seleccionados
+router.post('/selected', async (req, res) => {
+  const { shop, selectedProducts } = req.body;
+  if (!shop || !Array.isArray(selectedProducts)) {
+    return res.status(400).json({ error: 'Parámetros inválidos' });
+  }
+
+  try {
+    const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
+    const content = await fs.readFile(filePath, 'utf-8');
+    const data = JSON.parse(content);
+
+    data.selectedProducts = selectedProducts;
+
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Error al guardar productos seleccionados:', err.message);
+    return res.status(500).json({ error: 'No se pudo guardar la selección' });
   }
 });
 
