@@ -1,4 +1,4 @@
-// ProductManager.jsx 
+// ProductManager.jsx
 import { useEffect, useState } from "react";
 
 function ProductManager({ apiUrl, shop }) {
@@ -23,10 +23,13 @@ function ProductManager({ apiUrl, shop }) {
       .catch(console.error);
 
     // Obtener productos seleccionados
-    fetch(`${apiUrl}/shopify/products/selected?shop=${shop}`)
-      .then((res) => res.json())
-      .then((data) => setSelected(data.selectedProducts || []))
-      .catch(console.warn);
+    fetch(`${apiUrl}/shopify/products/selected?shop=${shop}`).then((res) =>
+      res.json()
+    );
+    then((data) => {
+      const ids = (data.selectedProducts || []).map((p) => p.id ?? p); // acepta objetos o números
+      setSelected(ids);
+    }).catch(console.warn);
   }, [apiUrl, shop]);
 
   const toggleSelection = (productId) => {
@@ -55,7 +58,8 @@ function ProductManager({ apiUrl, shop }) {
     if (!tiendaReferencia) return;
 
     fetch(
-      `${apiUrl}/shopify/compare?shop=${shop}&otherShop=${tiendaReferencia}.myshopify.com&mode=title`)
+      `${apiUrl}/shopify/compare?shop=${shop}&otherShop=${tiendaReferencia}.myshopify.com&mode=title`
+    )
       .then((res) => res.json())
       .then((data) => {
         if (data.comparaciones && data.comparaciones.length > 0) {

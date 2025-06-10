@@ -51,7 +51,8 @@ router.get("/selected", async (req, res) => {
     const key = `selectedProducts_${shop}`;
     const raw = await redisClient.get(key);
     const selected = raw ? JSON.parse(raw) : [];
-    return res.json({ selectedProducts: selected });
+    const ids = selected.map((p) => (typeof p === "object" ? p.id : p));
+    return res.json({ selectedProducts: ids });
   } catch (err) {
     console.error("Error al leer selección:", err.message);
     return res.status(500).json({ error: "No se pudo leer la selección" });
