@@ -7,6 +7,7 @@ const productsRoutes = require('./routes/products');
 const comparisonRoutes = require('./routes/comparison');
 const authRoutes = require('./routes/auth');
 
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -19,6 +20,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/shopify/products', productsRoutes);
 app.use('/shopify/comparison', comparisonRoutes);
 app.use('/shopify/auth', authRoutes);
+app.use('/debug', require('./routes/debug'));
+
+
 
 // Ruta base
 app.get('/', (req, res) => {
