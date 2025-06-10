@@ -5,7 +5,7 @@ const redisClient = require("../utils/redisClient");
 const fs = require("fs/promises");
 const path = require("path");
 
-// GET /shopify/products?shop=... - Devuelve productos desde Shopify o JSON local
+// GET /shopify/products?shop=...
 router.get("/", async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).json({ error: "Falta parámetro shop" });
@@ -24,17 +24,12 @@ router.get("/", async (req, res) => {
           },
         }
       );
-      return res.json(response.data.products || []);
+      return res.json({ products: response.data.products || [] });
     } else {
-      const filePath = path.join(
-        __dirname,
-        "..",
-        "external_data",
-        `${shop}.json`
-      );
+      const filePath = path.join(__dirname, "..", "external_data", shop);
       const content = await fs.readFile(filePath, "utf-8");
-      const products = JSON.parse(content);
-      return res.json(products);
+      const data = JSON.parse(content);
+      return res.json({ products: data.products || [] });
     }
   } catch (error) {
     console.error("Error al obtener productos:", error.message);
@@ -42,28 +37,23 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /shopify/products/selected?shop=... - Devuelve productos seleccionados
+// GET /shopify/products/selected?shop=...
 router.get("/selected", async (req, res) => {
   const shop = req.query.shop;
   if (!shop) return res.status(400).json({ error: "Falta parámetro shop" });
 
   try {
-    const filePath = path.join(
-      __dirname,
-      "..",
-      "external_data",
-      `${shop}.json`
-    );
-    const content = await fs.readFile(filePath, "utf-8");
-    const data = JSON.parse(content);
-    return res.json({ selectedProducts: data.selectedProducts || [] });
+    const redisKey = `selectedProducts_${shop}`;
+    const selected = await redisClient.get(redisKey);
+    const selectedProducts = selected ? JSON.parse(selected) : [];
+    return res.json({ selectedProducts });
   } catch (err) {
     console.error("Error al leer productos seleccionados:", err.message);
-    return res.status(404).json({ error: "No se pudo leer el archivo local" });
+    return res.status(500).json({ error: "No se pudo leer datos de Redis" });
   }
 });
 
-// POST /shopify/products/selected - Guarda productos seleccionados
+// POST /shopify/products/selected
 router.post("/selected", async (req, res) => {
   const { shop, selectedProducts } = req.body;
 
@@ -72,12 +62,7 @@ router.post("/selected", async (req, res) => {
   }
 
   try {
-    const filePath = path.join(
-      __dirname,
-      "..",
-      "external_data",
-      `${shop}.json`
-    );
+    const filePath = path.join(__dirname, "..", "external_data", shop);
     const content = await fs.readFile(filePath, "utf-8");
     const data = JSON.parse(content);
     const allProducts = data.products || [];
@@ -89,7 +74,6 @@ router.post("/selected", async (req, res) => {
       })
       .filter(Boolean);
 
-    // Guardar en Redis
     const redisKey = `selectedProducts_${shop}`;
     await redisClient.set(redisKey, JSON.stringify(enriched));
 
