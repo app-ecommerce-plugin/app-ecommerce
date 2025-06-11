@@ -57,7 +57,7 @@ function ProductManager({ apiUrl, shop }) {
     ); // escribe:  tienda-prueba-multiusuario.myshopify.com
     if (!competidor) return;
 
-    fetch(`${apiUrl}/shopify/compare?shop=${shop}&other=${competidor}`)
+    fetch(`${apiUrl}/shopify/compare?shop=${shop}&other=${tiendaRef}.myshopify.com`)
       .then((r) => r.json())
       .then((data) => {
         if (data.comparaciones?.length) {
