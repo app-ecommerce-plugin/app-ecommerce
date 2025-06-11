@@ -61,35 +61,38 @@ router.get("/selected", async (req, res) => {
 
 // POST /shopify/products/selected
 router.post("/selected", async (req, res) => {
-  const { shop, selectedProducts } = req.body; // selectedProducts = [1,3,…]
+  const { shop, selectedProducts } = req.body; // p. ej. [1,3]
 
   if (!shop || !Array.isArray(selectedProducts)) {
     return res.status(400).json({ error: "Parámetros inválidos" });
   }
 
   try {
-    // 1. Leemos todos los productos del JSON fijo que está en el repo
-    const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
-    const content = await fs.readFile(filePath, "utf-8");
-    const data = JSON.parse(content);
+    const filePath = path.join(
+      __dirname,
+      "..",
+      "external_data",
+      `${shop}.json`
+    );
+    const data = JSON.parse(await fs.readFile(filePath, "utf-8"));
     const allProds = data.products || [];
 
-    // 2. Enriquecemos: de cada ID obtenemos su título
+    // ——— ENRIQUECIDO con price ———
     const enriched = selectedProducts
       .map((id) => {
         const p = allProds.find((pr) => pr.id === id);
-        return p? { id: p.id, title: p.title, price: Number(p.price ?? 0) }: null;
+        return p
+          ? { id: p.id, title: p.title, price: Number(p.price ?? 0) }
+          : null;
       })
-      .filter(Boolean); // quita posibles null si un id no existe
+      .filter(Boolean);
 
-    // 3. Guardamos SOLO en Redis (no escribimos disco en Render)
     await redisClient.set(`selectedProducts_${shop}`, JSON.stringify(enriched));
 
-    // 4. Respondemos OK
-    return res.json({ success: true });
+    res.json({ success: true });
   } catch (err) {
     console.error("Error al guardar selección:", err.message);
-    return res.status(500).json({ error: "No se pudo guardar la selección" });
+    res.status(500).json({ error: "No se pudo guardar la selección" });
   }
 });
 

@@ -1,30 +1,19 @@
 const { getEmbedding, cosineSimilarity } = require('./embeddings');
 
-/**
- * Comparación básica:
- *   1. Intenta emparejar por ID (más fiable).
- *   2. Si no coincide por ID, compara el título (case-insensitive).
- *   Ignora entradas que no tengan título o id.
- */
+/* ------------------------------------------------------------------ */
+/* 1. Coincidencia exacta por título (case-insensitive)                */
+/* ------------------------------------------------------------------ */
 function compararPorTitulo(productosTienda, productosExternos) {
   const resultados = [];
 
   productosTienda.forEach((p) => {
-    if (!p) return; // seguridad contra null/undefined
+    if (!p || !p.title) return;
 
-    let match = null;
-
-    // ─ Emparejar por ID ─
-    if (p.id !== undefined) {
-      match = productosExternos.find((e) => e.id === p.id);
-    }
-
-    // ─ Emparejar por título ─
-    if (!match && p.title) {
-      match = productosExternos.find(
-        (e) => e.title && e.title.toLowerCase() === p.title.toLowerCase()
-      );
-    }
+    const match = productosExternos.find(
+      (e) =>
+        e.title &&
+        e.title.trim().toLowerCase() === p.title.trim().toLowerCase()
+    );
 
     if (match) {
       resultados.push({
@@ -39,8 +28,9 @@ function compararPorTitulo(productosTienda, productosExternos) {
   return resultados;
 }
 
-
-/** 2. Comparación semántica con embeddings */
+/* ------------------------------------------------------------------ */
+/* 2. Coincidencia semántica (embeddings OpenAI)                       */
+/* ------------------------------------------------------------------ */
 async function compararPorEmbeddings(productosTienda, productosExternos) {
   const externosEmb = await Promise.all(
     productosExternos.map(async (e) => ({
@@ -65,7 +55,7 @@ async function compararPorEmbeddings(productosTienda, productosExternos) {
         tienda: p,
         externo: best.externo,
         similitud: best.similitud.toFixed(3),
-        diferenciaPrecio: p.price - best.externo.price,
+        diferenciaPrecio: (p.price ?? 0) - (best.externo.price ?? 0),
         metodo: 'semantic'
       });
     }
