@@ -78,7 +78,7 @@ router.post("/selected", async (req, res) => {
     const enriched = selectedProducts
       .map((id) => {
         const p = allProds.find((pr) => pr.id === id);
-        return p ? { id: p.id, title: p.title } : null;
+        return p? { id: p.id, title: p.title, price: Number(p.price ?? 0) }: null;
       })
       .filter(Boolean); // quita posibles null si un id no existe
 
