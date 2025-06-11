@@ -52,29 +52,24 @@ function ProductManager({ apiUrl, shop }) {
   };
 
   const compararPrecios = () => {
-    const competidor = prompt(
-      "Dominio (sin .json) del archivo competidor en external_data"
-    ); // escribe:  tienda-prueba-multiusuario.myshopify.com
-    if (!competidor) return;
-
-    fetch(`${apiUrl}/shopify/compare?shop=${shop}&other=${tiendaRef}.myshopify.com`)
+    fetch(`${apiUrl}/shopify/comparison?shop=${shop}&mode=title`)
       .then((r) => r.json())
-      .then((data) => {
-        if (data.comparaciones?.length) {
-          const resumen = data.comparaciones
-            .map(
-              (c) =>
-                `${c.tienda.title}\n  Tu: ${c.tienda.price}€  ` +
-                `Otro: ${c.externo.price}€  ` +
-                `Δ ${c.diferenciaPrecio.toFixed(2)}€`
-            )
-            .join("\n");
-          alert("Comparación:\n\n" + resumen);
-        } else {
-          alert("Sin coincidencias.");
+      .then(({ comparaciones }) => {
+        if (!comparaciones?.length) {
+          alert("Sin coincidencias");
+          return;
         }
+        const resumen = comparaciones
+          .map(
+            (c) =>
+              `${c.tienda.title}\n  Tu: ${c.tienda.price}€  ` +
+              `Comp.: ${c.externo.price}€  ` +
+              `Δ ${c.diferenciaPrecio.toFixed(2)}€`
+          )
+          .join("\n\n");
+        alert("Comparación:\n\n" + resumen);
       })
-      .catch((err) => alert("Error: " + err.message));
+      .catch((e) => alert("Error: " + e.message));
   };
 
   const limpiarComparacion = () => {
