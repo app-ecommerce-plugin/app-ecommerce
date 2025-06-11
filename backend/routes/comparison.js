@@ -22,7 +22,7 @@ router.get("/", async (req, res) => {
     /* ---- 1. Selección guardada en Redis ---- */
     const rawSel = await redis.get(`selectedProducts_${shop}`);
     const seleccion = rawSel ? JSON.parse(rawSel) : []; // [{id,title},…]
-
+    
     /* ---- 2. Catálogo del “competidor” (archivo local) ---- */
     const filePath = path.join(
       __dirname,
