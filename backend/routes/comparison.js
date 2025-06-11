@@ -1,64 +1,45 @@
-const express = require('express');
-const router = express.Router();
-const axios = require('axios');
-const redisClient = require('../utils/redisClient');
-const fs = require('fs/promises');
-const path = require('path');
+const express = require("express");
+const path = require("path");
+const fs = require("fs/promises");
+const redis = require("../utils/redisClient");
+const { compararPorTitulo } = require("../utils/compararProductos");
 
-// GET /shopify/compare?shop=...&mode=title|semantic
-router.get('/', async (req, res) => {
-  const shop = req.query.shop;
-  const mode = req.query.mode || 'title';
-  if (!shop) return res.status(400).json({ error: 'Falta parámetro shop' });
+const router = express.Router();
+
+/**
+ * GET /shopify/compare?shop=mi-tienda&other=competidor
+ * Ejemplo:
+ *   /shopify/compare?shop=precios-dinamicos-prueba.myshopify.com
+ *                      &other=tienda-prueba-multiusuario.myshopify.com
+ */
+router.get("/", async (req, res) => {
+  const { shop, other } = req.query;
+  if (!shop || !other) {
+    return res.status(400).json({ error: "Faltan parámetros shop y other" });
+  }
 
   try {
-    const savedToken = await redisClient.get(`accessToken_${shop}`);
-    const selected = await redisClient.get('selectedProducts');
-    const selectedProducts = selected ? JSON.parse(selected) : [];
+    /* ---- 1. Selección guardada en Redis ---- */
+    const rawSel = await redis.get(`selectedProducts_${shop}`);
+    const seleccion = rawSel ? JSON.parse(rawSel) : []; // [{id,title},…]
 
-    let shopifyProducts = [];
-    if (savedToken) {
-      const response = await axios.get(`https://${shop}/admin/api/2023-01/products.json`, {
-        headers: {
-          'X-Shopify-Access-Token': savedToken,
-          'Content-Type': 'application/json'
-        }
-      });
-      shopifyProducts = response.data.products || [];
-    } else {
-      const filePath = path.join(__dirname, '..', 'external_data', `${shop}.json`);
-      const content = await fs.readFile(filePath, 'utf-8');
-      shopifyProducts = JSON.parse(content);
-    }
+    /* ---- 2. Catálogo del “competidor” (archivo local) ---- */
+    const filePath = path.join(
+      __dirname,
+      "..",
+      "external_data",
+      `${other}.json`
+    );
+    const dataCompet = JSON.parse(await fs.readFile(filePath, "utf-8"));
+    const productosCompet = dataCompet.products || [];
 
-    if (mode === 'title') {
-      const matched = [];
-      const notFound = [];
+    /* ---- 3. Comparación simple por título ---- */
+    const comparaciones = compararPorTitulo(seleccion, productosCompet);
 
-      selectedProducts.forEach(local => {
-        const match = shopifyProducts.find(prod =>
-          prod.title?.trim().toLowerCase() === local.title?.trim().toLowerCase()
-        );
-        if (match) {
-          matched.push({ local, shopify: match });
-        } else {
-          notFound.push(local);
-        }
-      });
-
-      return res.json({ matched, notFound });
-    } else if (mode === 'semantic') {
-      return res.json({
-        matched: [],
-        notFound: [],
-        mensaje: 'Comparación semántica no implementada'
-      });
-    } else {
-      return res.status(400).json({ error: 'Modo no válido' });
-    }
-  } catch (err) {
-    console.error('Error al comparar:', err.message);
-    return res.status(500).json({ error: 'Error al comparar productos' });
+    res.json({ comparaciones });
+  } catch (e) {
+    console.error("compare:", e.message);
+    res.status(500).json({ error: "Error al comparar" });
   }
 });
 

@@ -52,32 +52,29 @@ function ProductManager({ apiUrl, shop }) {
   };
 
   const compararPrecios = () => {
-    const tiendaReferencia = prompt(
-      "Introduce el dominio de la otra tienda a comparar (sin .myshopify.com)"
-    );
-    if (!tiendaReferencia) return;
+    const competidor = prompt(
+      "Dominio (sin .json) del archivo competidor en external_data"
+    ); // escribe:  tienda-prueba-multiusuario.myshopify.com
+    if (!competidor) return;
 
-    fetch(
-      `${apiUrl}/shopify/compare?shop=${shop}&otherShop=${tiendaReferencia}.myshopify.com&mode=title`
-    )
-      .then((res) => res.json())
+    fetch(`${apiUrl}/shopify/compare?shop=${shop}&other=${competidor}`)
+      .then((r) => r.json())
       .then((data) => {
-        if (data.comparaciones && data.comparaciones.length > 0) {
+        if (data.comparaciones?.length) {
           const resumen = data.comparaciones
             .map(
-              (p) =>
-                `${p.title}: ${p.tienda1}€ vs ${
-                  p.tienda2 || "No encontrado"
-                }€ → Δ ${p.diferencia || "n/a"}`
+              (c) =>
+                `${c.tienda.title}\n  Tu: ${c.tienda.price}€  ` +
+                `Otro: ${c.externo.price}€  ` +
+                `Δ ${c.diferenciaPrecio.toFixed(2)}€`
             )
             .join("\n");
-          alert(`🛍️ Comparativa:\n\n${resumen}`);
+          alert("Comparación:\n\n" + resumen);
         } else {
-          alert("No se encontraron coincidencias entre productos.");
+          alert("Sin coincidencias.");
         }
-        setCompareResult(data);
       })
-      .catch((err) => alert("Error al comparar productos: " + err.message));
+      .catch((err) => alert("Error: " + err.message));
   };
 
   const limpiarComparacion = () => {
