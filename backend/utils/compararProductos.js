@@ -20,7 +20,7 @@ function compararPorTitulo(productosTienda, productosExternos) {
         tienda: p,
         externo: match,
         diferenciaPrecio: (p.price ?? 0) - (match.price ?? 0),
-        metodo: 'title'
+        metodo: 'title',
       });
     }
   });
@@ -32,10 +32,11 @@ function compararPorTitulo(productosTienda, productosExternos) {
 /* 2. Coincidencia semántica (embeddings OpenAI)                       */
 /* ------------------------------------------------------------------ */
 async function compararPorEmbeddings(productosTienda, productosExternos) {
+  // Embeddings de todo el catálogo externo
   const externosEmb = await Promise.all(
     productosExternos.map(async (e) => ({
       ...e,
-      emb: await getEmbedding(`${e.title} ${e.description || ''}`)
+      emb: await getEmbedding(`${e.title} ${e.description || ''}`),
     }))
   );
 
@@ -47,16 +48,18 @@ async function compararPorEmbeddings(productosTienda, productosExternos) {
     let best = null;
     externosEmb.forEach((e) => {
       const sim = cosineSimilarity(embP, e.emb);
-      if (!best || sim > best.similitud) best = { externo: e, similitud: sim };
+      if (!best || sim > best.similitud)
+        best = { externo: e, similitud: sim };
     });
 
+    // Umbral configurable (0.82 ≈ 82 % de similitud)
     if (best && best.similitud > 0.82) {
       resultados.push({
         tienda: p,
         externo: best.externo,
         similitud: best.similitud.toFixed(3),
         diferenciaPrecio: (p.price ?? 0) - (best.externo.price ?? 0),
-        metodo: 'semantic'
+        metodo: 'semantic',
       });
     }
   }
