@@ -1,7 +1,7 @@
 // Importar módulos necesarios
 const express = require('express');
 const router = express.Router();
-const compararProductos = require('./compararProductos');  // Importa la función de comparación de productos
+const { compararPorTitulo, compararPorEmbeddings } = require('../utils/compararProductos');
 
 // Ruta API para iniciar la comparación de productos seleccionados
 router.get('/comparar', async (req, res) => {
