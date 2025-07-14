@@ -1,56 +1,41 @@
-require('dotenv').config();
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const redisClient = require("./utils/redisClient");
 
-const express = require('express');
-const cors = require('cors');
-const session = require('express-session');
-const RedisStore = require('connect-redis').default;
-const { createClient } = require('redis');
-const path = require('path');
+const productsRoutes = require("./routes/products");
+const comparisonRoutes = require("./routes/comparison");
+const authRoutes = require("./routes/auth");
+const debugRoutes = require("./routes/debug");
 
-// Configuración de Redis (compatible Render/Heroku/local)
-const redisClient = createClient({ url: process.env.REDIS_URL });
-redisClient.connect().catch(console.error);
-
-// App express
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Trust proxy para Render/proxy
-app.set('trust proxy', 1);
-
-// Middleware
-app.use(cors({
-  origin: true,
-  credentials: true
-}));
-app.use(express.json());
+// Middleware esencial
+app.use(cors());
+app.use(express.json()); // Permite el manejo de JSON en las peticiones
 app.use(express.urlencoded({ extended: true }));
 
-// Sesión
-app.use(session({
-  store: new RedisStore({ client: redisClient }),
-  secret: process.env.SESSION_SECRET || 'supersecret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: false, sameSite: 'lax' }
-}));
+// Rutas del backend
+app.use("/shopify/products", productsRoutes);
+app.use("/shopify/comparison", comparisonRoutes);
+app.use("/shopify/auth", authRoutes);
+app.use("/debug", debugRoutes);
 
-// Rutas API
-app.use('/products', require('./routes/products'));
-app.use('/comparison', require('./routes/comparison'));
-
-// Ruta de prueba para saber si está vivo
-app.get('/ping', (req, res) => res.send('pong'));
-
-// Servir el frontend (si tienes build estático en /frontend/dist)
-app.use(express.static(path.join(__dirname, '../frontend/dist')));
-app.get('*', (req, res) =>
-  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'))
-);
-
-// Arranque del servidor
-app.listen(PORT, () => {
-  console.log(`Servidor iniciado en puerto ${PORT}`);
+// Ruta base para verificar que el backend esté activo
+app.get("/", (req, res) => {
+  res.send("Backend de Shopify activo 🚀");
 });
 
-module.exports = { redisClient };
+// Conexión con Redis y arranque del servidor
+redisClient
+  .connect()
+  .then(() => {
+    console.log("Redis conectado ✅");
+    app.listen(PORT, () => {
+      console.log(`Servidor activo en puerto ${PORT} 🚀`);
+    });
+  })
+  .catch((err) => {
+    console.error("Error conectando a Redis:", err);
+  });

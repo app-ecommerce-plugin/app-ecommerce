@@ -1,61 +1,79 @@
 const express = require("express");
 const router = express.Router();
-const { redisClient } = require("../server");
 const axios = require("axios");
+const redisClient = require("../utils/redisClient");
+const fs = require("fs/promises");
+const path = require("path");
 
-// Utilidad: Normaliza IDs de Shopify
-function parseSelectedIds(input) {
-  if (!input) return [];
-  let arr = Array.isArray(input) ? input : [input];
-  return arr.map((i) => {
-    let id = typeof i === "object" ? i.id : i;
-    if (typeof id === "string" && id.startsWith("gid://")) {
-      id = id.split("/").pop();
-    }
-    return String(id);
-  });
-}
+// Obtener productos desde Shopify o JSON según USE_LOCAL_FILES
+router.get("/", async (req, res) => {
+  const shop = req.query.shop;
+  if (!shop) return res.status(400).json({ error: "Falta parámetro shop" });
 
-// POST /products/select  (guarda selección)
-router.post("/select", async (req, res) => {
-  const shop = req.session?.shop || req.body.shop;
-  const rawSelection = req.body.selectedIds || req.body.selected || req.body;
-  const selectedIds = parseSelectedIds(rawSelection);
-  if (!shop) return res.status(400).json({ error: "Tienda no especificada" });
   try {
-    await redisClient.set(
-      `selectedProducts:${shop}`,
-      JSON.stringify(selectedIds)
-    );
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Error guardando selección:", err);
-    res.status(500).json({ error: "Error al guardar la selección" });
+    let products;
+
+    if (process.env.USE_LOCAL_FILES === "true") {
+      const filePath = path.join(
+        __dirname,
+        "..",
+        "external_data",
+        `${shop}.json`
+      );
+      const fileContent = await fs.readFile(filePath, "utf-8");
+      products = JSON.parse(fileContent).products;
+    } else {
+      const token = await redisClient.get(`accessToken_${shop}`);
+      if (!token) {
+        return res.status(401).json({ error: "No hay token para esta tienda" });
+      }
+      const response = await axios.get(
+        `https://${shop}/admin/api/2023-01/products.json`,
+        {
+          headers: { "X-Shopify-Access-Token": token },
+        }
+      );
+      products = response.data.products;
+    }
+
+    res.json({ products });
+  } catch (error) {
+    console.error("Error al obtener productos:", error);
+    res.status(500).json({ error: "Error al obtener productos" });
   }
 });
 
-// GET /products/selected (devuelve productos seleccionados reales)
-router.get("/selected", async (req, res) => {
-  const shop = req.session?.shop || req.query.shop;
-  if (!shop) return res.status(400).json({ error: "Tienda no especificada" });
+// Guardar selección de productos en Redis
+router.post("/selected", async (req, res) => {
+  const { shop, selectedProducts } = req.body;
+  if (!shop || !selectedProducts) {
+    return res.status(400).json({ error: "Parámetros inválidos" });
+  }
+
   try {
-    const idsJson = await redisClient.get(`selectedProducts:${shop}`);
-    const selectedIds = parseSelectedIds(idsJson ? JSON.parse(idsJson) : []);
-    if (!selectedIds.length) return res.json([]);
-    // Usar token de Redis (guardado al autorizar la app)
-    const token = await redisClient.get(`accessToken_${shop}`);
-    if (!token)
-      return res.status(401).json({ error: "No hay token para la tienda" });
-    const url = `https://${shop}/admin/api/2023-07/products.json?ids=${selectedIds.join(
-      ","
-    )}`;
-    const response = await axios.get(url, {
-      headers: { "X-Shopify-Access-Token": token },
-    });
-    res.json(response.data.products || []);
+    await redisClient.set(
+      `selectedProducts_${shop}`,
+      JSON.stringify(selectedProducts)
+    );
+    res.json({ success: true });
   } catch (err) {
-    console.error("Error obteniendo seleccionados:", err);
-    res.status(500).json({ error: "Error al obtener seleccionados" });
+    console.error("Error al guardar selección:", err.message);
+    res.status(500).json({ error: "No se pudo guardar la selección" });
+  }
+});
+
+// Obtener selección desde Redis
+router.get("/selected", async (req, res) => {
+  const { shop } = req.query;
+  if (!shop) return res.status(400).json({ error: "Falta parámetro shop" });
+
+  try {
+    const raw = await redisClient.get(`selectedProducts_${shop}`);
+    const selectedProducts = raw ? JSON.parse(raw) : [];
+    res.json({ selectedProducts });
+  } catch (err) {
+    console.error("Error al obtener selección:", err.message);
+    res.status(500).json({ error: "Error al obtener la selección" });
   }
 });
 

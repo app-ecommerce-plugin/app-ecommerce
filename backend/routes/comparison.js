@@ -1,56 +1,64 @@
 const express = require("express");
-const path = require("path");
-const fs = require("fs/promises");
-const { compararPorTitulo } = require("../utils/compararProductos");
-
 const router = express.Router();
+const redisClient = require("../utils/redisClient");
+const fs = require("fs/promises");
+const path = require("path");
+const { compararPorTitulo } = require("../utils/compararProductos");
+const axios = require("axios");
 
-const USE_LOCAL_FILES = process.env.USE_LOCAL_FILES === "true";
-
-// GET /shopify/comparison?shop=mi-tienda.myshopify.com
 router.get("/", async (req, res) => {
   const { shop } = req.query;
   if (!shop) return res.status(400).json({ error: "Falta parámetro shop" });
 
   try {
-    // 1. Leer productos de la tienda (simulados)
-    const tiendaFile = path.join(
+    const rawSel = await redisClient.get(`selectedProducts_${shop}`);
+    const seleccion = rawSel ? JSON.parse(rawSel) : [];
+
+    let storeProducts = [];
+
+    if (process.env.USE_LOCAL_FILES === "true") {
+      const filePath = path.join(
+        __dirname,
+        "..",
+        "external_data",
+        `${shop}.json`
+      );
+      const content = await fs.readFile(filePath, "utf-8");
+      storeProducts = JSON.parse(content).products;
+    } else {
+      const token = await redisClient.get(`accessToken_${shop}`);
+      if (!token) {
+        return res.status(403).json({ error: `No hay token para ${shop}` });
+      }
+      const response = await axios.get(
+        `https://${shop}/admin/api/2023-01/products.json`,
+        {
+          headers: { "X-Shopify-Access-Token": token },
+        }
+      );
+      storeProducts = response.data.products;
+    }
+
+    const filePath = path.join(
       __dirname,
       "..",
       "external_data",
       `${shop}.json`
     );
-    const tiendaJson = JSON.parse(await fs.readFile(tiendaFile, "utf-8"));
-    const productosTienda = tiendaJson.products || [];
+    const dataCompetencia = JSON.parse(
+      await fs.readFile(filePath, "utf-8")
+    ).products;
 
-    // 2. Leer productos de la competencia (puedes usar la otra tienda, por ejemplo)
-    // Para la prueba, simula que la "otra tienda" es la segunda de tus archivos
-    const otrosArchivos = [
-      "precios-dinamicos-prueba.myshopify.com.json",
-      "tienda-prueba-multiusuario.myshopify.com.json",
-    ];
-    const archivoCompetencia = otrosArchivos.find((a) => !a.includes(shop));
-    const competenciaFile = path.join(
-      __dirname,
-      "..",
-      "external_data",
-      archivoCompetencia
-    );
-    const competenciaJson = JSON.parse(
-      await fs.readFile(competenciaFile, "utf-8")
-    );
-    const productosCompetencia = competenciaJson.products || [];
-
-    // 3. Comparar por título exacto
     const comparaciones = compararPorTitulo(
-      productosTienda,
-      productosCompetencia
+      storeProducts,
+      dataCompetencia,
+      seleccion
     );
 
     res.json({ comparaciones });
   } catch (e) {
-    console.error("comparison:", e.message);
-    res.status(500).json({ error: "Error al comparar", detalle: e.message });
+    console.error("Error en comparación:", e.message);
+    res.status(500).json({ error: "Error al comparar" });
   }
 });
 
