@@ -28,14 +28,6 @@ app.get("/", (req, res) => {
 });
 
 // Conexión con Redis y arranque del servidor
-redisClient
-  .connect()
-  .then(() => {
-    console.log("Redis conectado ✅");
-    app.listen(PORT, () => {
-      console.log(`Servidor activo en puerto ${PORT} 🚀`);
-    });
-  })
-  .catch((err) => {
-    console.error("Error conectando a Redis:", err);
-  });
+app.listen(PORT, () => {
+  console.log(`Servidor activo en puerto ${PORT} 🚀`);
+});
