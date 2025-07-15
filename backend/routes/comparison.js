@@ -1,65 +1,37 @@
+// Importar módulos necesarios
 const express = require("express");
 const router = express.Router();
-const redisClient = require("../utils/redisClient");
-const fs = require("fs/promises");
-const path = require("path");
-const { compararPorTitulo } = require("../utils/compararProductos");
-const axios = require("axios");
+const {
+  compararPorTitulo,
+  compararPorEmbeddings,
+} = require("../utils/compararProductos");
 
-router.get("/", async (req, res) => {
-  const { shop } = req.query;
-  if (!shop) return res.status(400).json({ error: "Falta parámetro shop" });
-
+// Ruta API para iniciar la comparación de productos seleccionados
+router.get("/comparar", async (req, res) => {
   try {
-    const rawSel = await redisClient.get(`selectedProducts_${shop}`);
-    const seleccion = rawSel ? JSON.parse(rawSel) : [];
-
-    let storeProducts = [];
-
-    if (process.env.USE_LOCAL_FILES === "true") {
-      const filePath = path.join(
-        __dirname,
-        "..",
-        "external_data",
-        `${shop}.json`
-      );
-      const content = await fs.readFile(filePath, "utf-8");
-      storeProducts = JSON.parse(content).products;
-    } else {
-      const token = await redisClient.get(`accessToken_${shop}`);
-      if (!token) {
-        return res.status(403).json({ error: `No hay token para ${shop}` });
-      }
-      const response = await axios.get(
-        `https://${shop}/admin/api/2023-01/products.json`,
-        {
-          headers: { "X-Shopify-Access-Token": token },
-        }
-      );
-      storeProducts = response.data.products;
+    // Obtener el dominio de la tienda Shopify actual.
+    // Se asume que está disponible en la sesión del usuario o como parámetro de consulta.
+    const shopDomain = req.session.shopDomain || req.query.shop;
+    if (!shopDomain) {
+      return res.status(400).json({ error: "Falta el dominio de la tienda" });
     }
 
-    const filePath = path.join(
-      __dirname,
-      "..",
-      "external_data",
-      `${shop}.json`
-    );
-    const dataCompetencia = JSON.parse(
-      await fs.readFile(filePath, "utf-8")
-    ).products;
+    // Llamar a la función de comparación de productos con el dominio de la tienda.
+    const resultadosComparacion = await compararProductos(shopDomain);
 
-    const comparaciones = compararPorTitulo(
-      storeProducts,
-      dataCompetencia,
-      seleccion
-    );
-
-    res.json({ comparaciones });
-  } catch (e) {
-    console.error("Error en comparación:", e.message);
-    res.status(500).json({ error: "Error al comparar" });
+    // Devolver los resultados en formato JSON
+    res.status(200).json(resultadosComparacion);
+  } catch (error) {
+    console.error("Error al comparar productos:", error);
+    res.status(500).json({
+      error: "Error interno al comparar productos",
+      detalles: error.message,
+    });
   }
+});
+
+router.get("/ping", (req, res) => {
+  res.send("OK: comparison funcionando");
 });
 
 module.exports = router;
