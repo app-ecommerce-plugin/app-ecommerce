@@ -19,7 +19,7 @@ app.use(express.urlencoded({ extended: true }));
 // Rutas
 app.use('/shopify/products', productsRoutes);
 app.use('/shopify/comparison', comparisonRoutes);
-app.use('/shopify/auth', authRoutes);
+app.use('/auth', authRoutes);
 app.use('/debug', require('./routes/debug'));
 
 

@@ -1,37 +1,25 @@
-// Importar módulos necesarios
 const express = require("express");
 const router = express.Router();
-const {
-  compararPorTitulo,
-  compararPorEmbeddings,
-} = require("../utils/compararProductos");
+const compararProductos = require("../utils/compararProductos");
 
-// Ruta API para iniciar la comparación de productos seleccionados
-router.get("/comparar", async (req, res) => {
+router.get("/", async (req, res) => {
+  const shopDomain = req.query.shop;
+  const mode = req.query.mode || "title";
+
+  if (!shopDomain) {
+    return res.status(400).json({ error: "Falta el dominio de la tienda" });
+  }
+
   try {
-    // Obtener el dominio de la tienda Shopify actual.
-    // Se asume que está disponible en la sesión del usuario o como parámetro de consulta.
-    const shopDomain = req.session.shopDomain || req.query.shop;
-    if (!shopDomain) {
-      return res.status(400).json({ error: "Falta el dominio de la tienda" });
-    }
-
-    // Llamar a la función de comparación de productos con el dominio de la tienda.
-    const resultadosComparacion = await compararProductos(shopDomain);
-
-    // Devolver los resultados en formato JSON
-    res.status(200).json(resultadosComparacion);
+    const comparaciones = await compararProductos(shopDomain, mode);
+    res.status(200).json({ comparaciones });
   } catch (error) {
-    console.error("Error al comparar productos:", error);
+    console.error("Error al comparar productos:", error.message);
     res.status(500).json({
       error: "Error interno al comparar productos",
       detalles: error.message,
     });
   }
-});
-
-router.get("/ping", (req, res) => {
-  res.send("OK: comparison funcionando");
 });
 
 module.exports = router;

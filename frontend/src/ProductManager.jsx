@@ -43,7 +43,17 @@ function ProductManager({ apiUrl, shop }) {
     fetch(`${apiUrl}/shopify/products/selected`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shop, selectedProducts: selected }),
+      body: JSON.stringify({
+        shop,
+        selectedProducts: selected
+          .map((id) => {
+            const p = products.find((pr) => pr.id === id);
+            return p
+              ? { id: p.id, title: p.title, price: p.variants?.[0]?.price ?? 0 }
+              : null;
+          })
+          .filter(Boolean),
+      }),
     })
       .then((res) =>
         res.ok ? alert("✅ Selección guardada") : alert("❌ Error al guardar")
@@ -53,23 +63,25 @@ function ProductManager({ apiUrl, shop }) {
 
   const compararPrecios = () => {
     fetch(`${apiUrl}/shopify/comparison?shop=${shop}&mode=title`)
-      .then((r) => r.json())
+      .then((res) => res.json())
       .then(({ comparaciones }) => {
         if (!comparaciones?.length) {
           alert("Sin coincidencias");
           return;
         }
+
         const resumen = comparaciones
           .map(
             (c) =>
-              `${c.tienda.title}\n  Tu: ${c.tienda.price}€  ` +
-              `Comp.: ${c.externo.price}€  ` +
-              `Δ ${c.diferenciaPrecio.toFixed(2)}€`
+              `${c.title}\n  Tienda: ${c.storePrice}€  Competencia: ${
+                c.competitorPrice
+              }€  Δ ${c.difference.toFixed(2)}€`
           )
           .join("\n\n");
-        alert("Comparación:\n\n" + resumen);
+
+        alert("📊 Comparación:\n\n" + resumen);
       })
-      .catch((e) => alert("Error: " + e.message));
+      .catch((err) => alert("❌ Error: " + err.message));
   };
 
   const limpiarComparacion = () => {
