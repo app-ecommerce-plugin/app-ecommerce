@@ -109,7 +109,9 @@ router.post("/selected", async (req, res) => {
     // Enriquecer con título y precio
     const enriched = selectedProducts
       .map((id) => {
-        const p = allProds.find((pr) => String(pr.id) === String(id));
+        // Manejar tanto IDs como objetos completos
+        const productId = typeof id === 'object' ? id.id : id;
+        const p = allProds.find((pr) => String(pr.id) === String(productId));
         const variantPrice = p?.variants?.[0]?.price ?? p?.price ?? 0;
         return p
           ? { id: p.id, title: p.title, price: parseFloat(variantPrice) }

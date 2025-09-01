@@ -45,14 +45,7 @@ function ProductManager({ apiUrl, shop }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         shop,
-        selectedProducts: selected
-          .map((id) => {
-            const p = products.find((pr) => pr.id === id);
-            return p
-              ? { id: p.id, title: p.title, price: p.variants?.[0]?.price ?? 0 }
-              : null;
-          })
-          .filter(Boolean),
+        selectedProducts: selected, // Enviar solo los IDs, no objetos completos
       }),
     })
       .then((res) =>
