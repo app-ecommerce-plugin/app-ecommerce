@@ -13,7 +13,8 @@ const USE_LOCAL = () => process.env.USE_LOCAL_FILES === "true";
 const norm = (s = "") =>
   String(s)
     .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9\\s]/g, " ")
     .replace(/\\s+/g, " ")
     .trim();
@@ -23,7 +24,7 @@ const isShopifyId = (id) => String(id).length >= 10;
 
 /* ------------------------------------------------------------------ */
 /* GET /shopify/products?shop=...                                     */
-/* Devuelve catálogo de la tienda (Shopify o JSON local)              */
+/* Devuelve SIEMPRE [{id,title,price}] (Shopify o JSON local)         */
 /* ------------------------------------------------------------------ */
 router.get("/", async (req, res) => {
   const shop = req.query.shop;
@@ -31,25 +32,38 @@ router.get("/", async (req, res) => {
 
   try {
     const savedToken = await redisClient.get(`accessToken_${shop}`);
+    const useLocal = process.env.USE_LOCAL_FILES === "true";
 
-    // 1) Si hay token y NO forzamos modo local: Shopify
-    if (savedToken && !USE_LOCAL()) {
-      const response = await axios.get(
+    // Con token y NO forzado local → Shopify
+    if (savedToken && !useLocal) {
+      const { data } = await axios.get(
         `https://${shop}/admin/api/2023-01/products.json?limit=250`,
-        {
-          headers: {
-            "X-Shopify-Access-Token": savedToken,
-            "Content-Type": "application/json",
-          },
-        }
+        { headers: { "X-Shopify-Access-Token": savedToken } }
       );
-      return res.json({ products: response.data.products || [] });
+
+      const simplified = (data.products || []).map((p) => ({
+        id: p.id,
+        title: p.title,
+        price: Number(p?.variants?.[0]?.price ?? 0),
+      }));
+
+      return res.json({ products: simplified });
     }
 
-    // 2) Catálogo de prueba en external_data/ (fallback o forzado por USE_LOCAL_FILES)
-    const filePath = path.join(__dirname, "..", "external_data", `${shop}.json`);
+    // Fallback o modo local → JSON local
+    const filePath = path.join(
+      __dirname,
+      "..",
+      "external_data",
+      `${shop}.json`
+    );
     const data = JSON.parse(await fs.readFile(filePath, "utf-8"));
-    return res.json({ products: data.products || [] });
+    const simplified = (data.products || []).map((p) => ({
+      id: p.id,
+      title: p.title,
+      price: Number(p.price ?? 0),
+    }));
+    return res.json({ products: simplified });
   } catch (err) {
     console.error("Error al obtener productos:", err.message);
     res.status(500).json({ error: "No se pudieron obtener productos" });
@@ -112,8 +126,14 @@ router.post("/selected", async (req, res) => {
       // 2) Cargamos el JSON local (solo por si llegan IDs locales y necesitamos su título)
       let localById = new Map();
       try {
-        const filePath = path.join(__dirname, "..", "external_data", `${shop}.json`);
-        const local = JSON.parse(await fs.readFile(filePath, "utf-8")).products || [];
+        const filePath = path.join(
+          __dirname,
+          "..",
+          "external_data",
+          `${shop}.json`
+        );
+        const local =
+          JSON.parse(await fs.readFile(filePath, "utf-8")).products || [];
         local.forEach((p) => localById.set(p.id, p));
       } catch (_) {
         // si no existe, no pasa nada; solo afectaría a IDs locales
@@ -138,10 +158,18 @@ router.post("/selected", async (req, res) => {
             const hit = indexByTitle.get(norm(local.title));
             if (!hit) continue;
             const price = hit?.variants?.[0]?.price ?? 0;
-            enriched.push({ id: hit.id, title: hit.title, price: Number(price) });
+            enriched.push({
+              id: hit.id,
+              title: hit.title,
+              price: Number(price),
+            });
           }
         } catch (e) {
-          console.error("Fallo enriqueciendo producto seleccionado:", rawId, e.message);
+          console.error(
+            "Fallo enriqueciendo producto seleccionado:",
+            rawId,
+            e.message
+          );
           // seguimos con el resto
         }
       }
@@ -153,12 +181,24 @@ router.post("/selected", async (req, res) => {
         });
       }
 
-      await redisClient.set(`selectedProducts_${shop}`, JSON.stringify(enriched));
-      return res.json({ success: true, source: "shopify", saved: enriched.length });
+      await redisClient.set(
+        `selectedProducts_${shop}`,
+        JSON.stringify(enriched)
+      );
+      return res.json({
+        success: true,
+        source: "shopify",
+        saved: enriched.length,
+      });
     }
 
     // ===== Modo LOCAL (sin token o forzado) =====
-    const filePath = path.join(__dirname, "..", "external_data", `${shop}.json`);
+    const filePath = path.join(
+      __dirname,
+      "..",
+      "external_data",
+      `${shop}.json`
+    );
     const allProds =
       JSON.parse(await fs.readFile(filePath, "utf-8")).products || [];
     enriched = selectedProducts
