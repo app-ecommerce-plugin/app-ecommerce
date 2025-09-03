@@ -1,178 +1,239 @@
 // utils/compararProductos.js
 const fs = require('fs');
 const path = require('path');
-const fetch = require('node-fetch'); // si usas Node 18+ podrías usar global fetch
-const redisClient = require('./redisClient');
+const fetch = require('node-fetch');
+const redisClient = require('../utils/redisClient');
 
-/**
- * Normaliza títulos para mejorar el matching por texto:
- * - minúsculas
- * - sin acentos
- * - sin signos raros
- * - espacios colapsados
- */
-function normTitle(s = '') {
-  return String(s)
+// (opcional) embeddings para modo "semantic"
+let getEmbedding, cosineSimilarity;
+try {
+  ({ getEmbedding, cosineSimilarity } = require('../utils/embeddings'));
+} catch (_) {
+  // si no existe utils/embeddings.js, el modo semantic no estará disponible
+}
+
+/* ----------------- Helpers ----------------- */
+const USE_LOCAL = () => process.env.USE_LOCAL_FILES === 'true';
+
+const norm = (s = '') =>
+  String(s)
     .toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-}
 
-/**
- * Carga el JSON de external_data para la tienda dada.
- */
-function loadLocalCatalog(shopDomain) {
-  const filePath = path.join(__dirname, '..', 'external_data', `${shopDomain}.json`);
-  const raw = fs.readFileSync(filePath, 'utf8');
+function loadLocalProducts(shopDomain) {
+  const fp = path.join(__dirname, '..', 'external_data', `${shopDomain}.json`);
+  const raw = fs.readFileSync(fp, 'utf8');
   const data = JSON.parse(raw);
   return Array.isArray(data.products) ? data.products : [];
 }
 
-/**
- * Devuelve una lista de { title, price } de los productos seleccionados de la tienda,
- * usando API de Shopify (si hay token y no forzamos local) o los datos locales/Redis.
- */
-async function getSelectedStoreProducts(shopDomain, options = {}) {
-  const USE_LOCAL = process.env.USE_LOCAL_FILES === 'true';
+function loadCompetitors(shopDomain, other = null) {
+  const base = path.join(__dirname, '..', 'external_data');
 
-  // 1) Obtener selección desde Redis (clave unificada con "_")
-  const redisKey = `selectedProducts_${shopDomain}`;
+  const candidates = other
+    ? [path.join(base, `${other}.json`)]
+    : [
+        path.join(base, `${shopDomain}.competitors.json`),
+        path.join(base, `${shopDomain}-competitors.json`),
+        path.join(base, `${shopDomain}.json`) // fallback
+      ];
+
+  for (const fp of candidates) {
+    try {
+      const raw = fs.readFileSync(fp, 'utf8');
+      const data = JSON.parse(raw);
+      return Array.isArray(data.products) ? data.products : [];
+    } catch (_) { /* prueba siguiente */ }
+  }
+  return [];
+}
+
+/* ----------------- Datos de tienda (siempre por TÍTULO) ----------------- */
+/**
+ * Devuelve [{title, price}] de los productos seleccionados de la tienda.
+ * - Si hay token y no forzamos local: obtiene desde Shopify (por ID de Shopify que tengamos guardado).
+ * - Si estamos en local (o no hay token): resuelve desde JSON local.
+ * - Siempre devuelve objetos con {title, price} y la comparación será por título.
+ */
+async function getSelectedStoreProducts(shopDomain) {
+  // leemos selección desde Redis (puede ser [{id,title,price}] o bien IDs)
+  const key = `selectedProducts_${shopDomain}`;
   let seleccion = [];
   try {
-    const raw = await redisClient.get(redisKey);
+    const raw = await redisClient.get(key);
     seleccion = raw ? JSON.parse(raw) : [];
   } catch (e) {
-    console.error(`Error leyendo selección en Redis (${redisKey}):`, e);
-    seleccion = [];
+    console.error('Redis selección err:', e.message);
   }
-  if (!Array.isArray(seleccion) || seleccion.length === 0) return [];
+  if (!Array.isArray(seleccion) || !seleccion.length) return [];
 
-  // ¿Hay token OAuth guardado?
+  // Si tenemos ya objetos con título/precio, basta con usarlos
+  if (typeof seleccion[0] === 'object' && seleccion[0] && 'title' in seleccion[0]) {
+    return seleccion.map(p => ({ title: p.title, price: Number(p.price) || 0 }));
+  }
+
+  // Si vinieran IDs "locales", resolvemos por JSON local
+  if (USE_LOCAL()) {
+    const all = loadLocalProducts(shopDomain);
+    return all
+      .filter(p => seleccion.includes(p.id))
+      .map(p => ({ title: p.title, price: Number(p.price) || 0 }));
+  }
+
+  // Si hay token Shopify y vinieran IDs de Shopify, los resolvemos por API
   const accessToken = await redisClient.get(`accessToken_${shopDomain}`);
-  const debeUsarLocal = USE_LOCAL || !accessToken;
-
-  // 2) Si debemos usar local (o no hay token), devolvemos directamente la selección enriquecida
-  if (debeUsarLocal) {
-    // La selección se guarda como [{ id, title, price }, ...]
-    // Si por algún motivo fueran solo IDs, intentamos resolverlos contra el JSON local.
-    if (typeof seleccion[0] === 'object' && seleccion[0] !== null && 'title' in seleccion[0]) {
-      return seleccion.map(p => ({ title: p.title, price: Number(p.price) || 0 }));
-    } else {
-      // Cargar JSON local y filtrar por IDs
-      const all = loadLocalCatalog(shopDomain);
-      const ids = seleccion.map(x => (typeof x === 'object' ? x.id : x));
-      return all
-        .filter(p => ids.includes(p.id))
-        .map(p => ({ title: p.title, price: Number(p.price) || 0 }));
-    }
+  if (!accessToken) {
+    // sin token: último recurso → JSON local
+    const all = loadLocalProducts(shopDomain);
+    return all
+      .filter(p => seleccion.includes(p.id))
+      .map(p => ({ title: p.title, price: Number(p.price) || 0 }));
   }
 
-  // 3) Si hay token y no forzamos modo local, pedimos a Shopify cada producto seleccionado
-  const ids = seleccion.map(x => (typeof x === 'object' ? x.id : x));
-  const productosTienda = [];
-
-  for (const productId of ids) {
+  // IDs de Shopify → consultar API
+  const productos = [];
+  for (const id of seleccion) {
     try {
-      const url = `https://${shopDomain}/admin/api/2023-04/products/${productId}.json`;
-      const resp = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'X-Shopify-Access-Token': accessToken,
-          'Content-Type': 'application/json',
-        },
-      });
+      const url = `https://${shopDomain}/admin/api/2023-04/products/${id}.json`;
+      const resp = await fetch(url, { headers: { 'X-Shopify-Access-Token': accessToken } });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
       const data = await resp.json();
-      const producto = data.product;
-      if (!producto) continue;
-
-      const price = producto.variants?.length
-        ? Number(producto.variants[0].price) || 0
-        : Number(producto.price) || 0;
-
-      productosTienda.push({ title: producto.title, price });
-    } catch (err) {
-      console.error(`Error obteniendo producto ${productId} de Shopify:`, err.message);
-      // Continuar con el resto
+      const p = data.product;
+      const price = p?.variants?.[0]?.price ?? 0;
+      productos.push({ title: p.title, price: Number(price) || 0 });
+    } catch (e) {
+      console.error('Shopify product err:', id, e.message);
     }
   }
-
-  return productosTienda;
+  return productos;
 }
 
-/**
- * Carga los "precios de competencia" desde external_data/{shop}.json
- * (mismo fichero que usamos como catálogo de prueba).
- */
-function getCompetitorCatalog(shopDomain) {
-  try {
-    return loadLocalCatalog(shopDomain);
-  } catch (e) {
-    console.error(`Error leyendo catálogo de competencia para ${shopDomain}:`, e.message);
-    return [];
-  }
-}
+/* ----------------- Estrategias de matching por NOMBRE ----------------- */
+function match_exact(storeList, compList) {
+  const compMap = new Map();
+  for (const c of compList) compMap.set(norm(c.title), c);
 
-/**
- * Compara por título (normalizado), permitiendo coincidencias exactas o inclusión (a ⊆ b o b ⊆ a).
- */
-function compararListasPorTitulo(productosTienda, productosCompetencia) {
-  const compIndex = new Map();
-  for (const pc of productosCompetencia) {
-    if (!pc?.title) continue;
-    const key = normTitle(pc.title);
-    if (!key) continue;
-    // guardamos el primero que veamos
-    if (!compIndex.has(key)) compIndex.set(key, pc);
-  }
-
-  const comparaciones = [];
-  for (const pt of productosTienda) {
-    const a = normTitle(pt.title);
-    if (!a) continue;
-
-    // Búsqueda por igualdad o inclusión
-    let encontrado = null;
-    if (compIndex.has(a)) {
-      encontrado = compIndex.get(a);
-    } else {
-      for (const [k, val] of compIndex) {
-        if (k.includes(a) || a.includes(k)) {
-          encontrado = val;
-          break;
-        }
-      }
-    }
-
-    if (encontrado) {
-      const precioTienda = Number(pt.price) || 0;
-      const precioComp = Number(encontrado.price) || 0;
-      comparaciones.push({
-        tienda: { title: pt.title, price: precioTienda },
-        externo: { title: encontrado.title, price: precioComp },
-        diferenciaPrecio: +(precioTienda - precioComp).toFixed(2),
+  const out = [];
+  for (const s of storeList) {
+    const k = norm(s.title);
+    const hit = compMap.get(k);
+    if (hit) {
+      const tienda = { title: s.title, price: Number(s.price) || 0 };
+      const externo = { title: hit.title, price: Number(hit.price) || 0 };
+      out.push({
+        tienda, externo,
+        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2)
       });
     }
   }
-
-  return comparaciones;
+  return out;
 }
 
-/**
- * Función principal invocada desde la ruta.
- */
-async function compararProductos(shopDomain, options = {}) {
-  const productosTienda = await getSelectedStoreProducts(shopDomain, options);
-  if (!productosTienda.length) return [];
+function match_includes(storeList, compList) {
+  // igualdad o inclusión (a ⊆ b o b ⊆ a)
+  const compNorm = compList.map(c => ({ ...c, _k: norm(c.title) }));
+  const out = [];
+  for (const s of storeList) {
+    const a = norm(s.title);
+    let hit = compNorm.find(x => x._k === a || x._k.includes(a) || a.includes(x._k));
+    if (hit) {
+      const tienda = { title: s.title, price: Number(s.price) || 0 };
+      const externo = { title: hit.title, price: Number(hit.price) || 0 };
+      out.push({
+        tienda, externo,
+        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2)
+      });
+    }
+  }
+  return out;
+}
 
-  const productosCompetencia = getCompetitorCatalog(shopDomain);
-  if (!productosCompetencia.length) return [];
+function jaccardTokens(a, b) {
+  const A = new Set(norm(a).split(' ').filter(Boolean));
+  const B = new Set(norm(b).split(' ').filter(Boolean));
+  const inter = [...A].filter(x => B.has(x)).length;
+  const uni = new Set([...A, ...B]).size;
+  return uni ? inter / uni : 0;
+}
 
-  const comparaciones = compararListasPorTitulo(productosTienda, productosCompetencia);
-  return comparaciones;
+function match_fuzzy(storeList, compList, threshold = 0.6) {
+  const out = [];
+  for (const s of storeList) {
+    let best = null, bestScore = 0;
+    for (const c of compList) {
+      const score = jaccardTokens(s.title, c.title);
+      if (score > bestScore) { bestScore = score; best = c; }
+    }
+    if (best && bestScore >= threshold) {
+      const tienda = { title: s.title, price: Number(s.price) || 0 };
+      const externo = { title: best.title, price: Number(best.price) || 0 };
+      out.push({
+        tienda, externo,
+        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
+        score: +bestScore.toFixed(3)
+      });
+    }
+  }
+  return out;
+}
+
+async function match_semantic(storeList, compList, threshold = 0.80) {
+  if (!getEmbedding || !cosineSimilarity) {
+    throw new Error('Modo semantic no disponible: falta utils/embeddings.js o OPENAI_API_KEY');
+  }
+  // embeddings + caché Redis (lo hace getEmbedding)
+  const compEmb = [];
+  for (const c of compList) {
+    compEmb.push({ c, emb: await getEmbedding(c.title) });
+  }
+
+  const out = [];
+  for (const s of storeList) {
+    const embS = await getEmbedding(s.title);
+    let best = null, bestScore = -1;
+    for (const { c, emb } of compEmb) {
+      const score = cosineSimilarity(embS, emb);
+      if (score > bestScore) { bestScore = score; best = c; }
+    }
+    if (best && bestScore >= threshold) {
+      const tienda = { title: s.title, price: Number(s.price) || 0 };
+      const externo = { title: best.title, price: Number(best.price) || 0 };
+      out.push({
+        tienda, externo,
+        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
+        score: +bestScore.toFixed(3)
+      });
+    }
+  }
+  return out;
+}
+
+/* ----------------- Orquestador ----------------- */
+async function compararProductos(shopDomain, { mode = 'exact', threshold, other = null } = {}) {
+  // 1) datos tienda (siempre {title,price})
+  const storeList = await getSelectedStoreProducts(shopDomain);
+  if (!storeList.length) return [];
+
+  // 2) datos competencia
+  const compList = loadCompetitors(shopDomain, other);
+  if (!compList.length) return [];
+
+  // 3) matching por NOMBRE
+  switch (mode) {
+    case 'exact':
+      return match_exact(storeList, compList);
+    case 'includes':
+      return match_includes(storeList, compList);
+    case 'fuzzy':
+      return match_fuzzy(storeList, compList, threshold ?? 0.6);
+    case 'semantic':
+      return await match_semantic(storeList, compList, threshold ?? 0.80);
+    default:
+      return match_exact(storeList, compList);
+  }
 }
 
 module.exports = compararProductos;
