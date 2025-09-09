@@ -28,12 +28,15 @@ function loadLocalProducts(shopDomain) {
   const fp = path.join(__dirname, "..", "external_data", `${shopDomain}.json`);
   const raw = fs.readFileSync(fp, "utf8");
   const data = JSON.parse(raw);
-  return Array.isArray(data.products) ? data.products : [];
+  return Array.isArray(data.products)
+    ? data.products
+    : Array.isArray(data)
+    ? data
+    : [];
 }
 
-// Carga el catálogo de competencia (ahora asíncrona):
-// 1) Intenta leer el consolidado en Redis: competitors_<shop>
-// 2) Fallback a ficheros locales en /external_data
+// 1) intenta consolidado en Redis (competitors_<shop>)
+// 2) fallback a ficheros locales en /external_data
 async function loadCompetitors(shopDomain, other = null) {
   // 1) Consolidado en Redis
   try {
@@ -47,14 +50,14 @@ async function loadCompetitors(shopDomain, other = null) {
     console.error("Error leyendo consolidado en Redis:", e.message);
   }
 
-  // 2) Fallback a ficheros locales (lo que tenías antes, pero aceptando también arrays planos)
+  // 2) Fallback a ficheros locales
   const base = path.join(__dirname, "..", "external_data");
   const candidates = other
     ? [path.join(base, `${other}.json`)]
     : [
         path.join(base, `${shopDomain}.competitors.json`),
         path.join(base, `${shopDomain}-competitors.json`),
-        path.join(base, `${shopDomain}.json`), // fallback
+        path.join(base, `${shopDomain}.json`), // último fallback
       ];
 
   for (const fp of candidates) {
@@ -67,21 +70,12 @@ async function loadCompetitors(shopDomain, other = null) {
         ? data
         : [];
       if (arr.length) return arr;
-    } catch (_) {
-      /* prueba el siguiente */
-    }
+    } catch (_) {}
   }
-
   return [];
 }
 
 /* ----------------- Datos de tienda (siempre por TÍTULO) ----------------- */
-/**
- * Devuelve [{title, price}] de los productos seleccionados de la tienda.
- * - Si hay token y no forzamos local: obtiene desde Shopify (por ID de Shopify que tengamos guardado).
- * - Si estamos en local (o no hay token): resuelve desde JSON local.
- * - Siempre devuelve objetos con {title, price} y la comparación será por título.
- */
 async function getSelectedStoreProducts(shopDomain) {
   // leemos selección desde Redis (puede ser [{id,title,price}] o bien IDs)
   const key = `selectedProducts_${shopDomain}`;
@@ -94,7 +88,7 @@ async function getSelectedStoreProducts(shopDomain) {
   }
   if (!Array.isArray(seleccion) || !seleccion.length) return [];
 
-  // Si tenemos ya objetos con título/precio, basta con usarlos
+  // Si ya vienen objetos con {title, price}, úsalos tal cual
   if (
     typeof seleccion[0] === "object" &&
     seleccion[0] &&
@@ -106,7 +100,7 @@ async function getSelectedStoreProducts(shopDomain) {
     }));
   }
 
-  // Si vinieran IDs "locales", resolvemos por JSON local
+  // IDs locales → JSON local
   if (USE_LOCAL()) {
     const all = loadLocalProducts(shopDomain);
     return all
@@ -114,17 +108,15 @@ async function getSelectedStoreProducts(shopDomain) {
       .map((p) => ({ title: p.title, price: Number(p.price) || 0 }));
   }
 
-  // Si hay token Shopify y vinieran IDs de Shopify, los resolvemos por API
+  // IDs Shopify → API
   const accessToken = await redisClient.get(`accessToken_${shopDomain}`);
   if (!accessToken) {
-    // sin token: último recurso → JSON local
     const all = loadLocalProducts(shopDomain);
     return all
       .filter((p) => seleccion.includes(p.id))
       .map((p) => ({ title: p.title, price: Number(p.price) || 0 }));
   }
 
-  // IDs de Shopify → consultar API
   const productos = [];
   for (const id of seleccion) {
     try {
@@ -160,12 +152,15 @@ function match_exact(storeList, compList) {
         tienda,
         externo,
         diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
+        match_method: "exact",
+        score: 1,
       });
     }
   }
   return out;
 }
 
+// Mejorado: si hay varios candidatos (includes en ambas direcciones), elige el MÁS BARATO
 function match_includes(storeList, compList) {
   const compNorm = compList.map((c) => ({
     ...c,
@@ -176,14 +171,10 @@ function match_includes(storeList, compList) {
   const out = [];
   for (const s of storeList) {
     const a = norm(s.title);
-
-    // candidatos: igualdad o inclusión en ambas direcciones
     const candidates = compNorm.filter(
       (x) => x._k === a || x._k.includes(a) || a.includes(x._k)
     );
-
     if (candidates.length) {
-      // elige SIEMPRE el más barato si hay varios
       const best = candidates.reduce(
         (min, x) => (x._price < min._price ? x : min),
         candidates[0]
@@ -194,6 +185,8 @@ function match_includes(storeList, compList) {
         tienda,
         externo,
         diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
+        match_method: "includes",
+        score: 1,
       });
     }
   }
@@ -227,6 +220,7 @@ function match_fuzzy(storeList, compList, threshold = 0.6) {
         tienda,
         externo,
         diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
+        match_method: "fuzzy",
         score: +bestScore.toFixed(3),
       });
     }
@@ -240,7 +234,7 @@ async function match_semantic(storeList, compList, threshold = 0.8) {
       "Modo semantic no disponible: falta utils/embeddings.js o OPENAI_API_KEY"
     );
   }
-  // embeddings + caché Redis (lo hace getEmbedding)
+  // precálculo embeddings competencia
   const compEmb = [];
   for (const c of compList) {
     compEmb.push({ c, emb: await getEmbedding(c.title) });
@@ -265,10 +259,116 @@ async function match_semantic(storeList, compList, threshold = 0.8) {
         tienda,
         externo,
         diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
+        match_method: "semantic",
         score: +bestScore.toFixed(3),
       });
     }
   }
+  return out;
+}
+
+/* ------- Nuevo: modo AUTO (pipeline exact → includes → fuzzy → semantic) ------- */
+async function match_auto(
+  storeList,
+  compList,
+  { fuzzyThreshold = 0.6, semanticThreshold = 0.8, allowSemantic = true } = {}
+) {
+  const out = [];
+  // precálculos rápidos
+  const compMap = new Map(compList.map((c) => [norm(c.title), c]));
+  const compNorm = compList.map((c) => ({
+    ...c,
+    _k: norm(c.title),
+    _price: Number(c.price) || 0,
+  }));
+
+  // precálculo embeddings si procede
+  let compEmb = null;
+  if (allowSemantic && getEmbedding && cosineSimilarity) {
+    compEmb = [];
+    for (const c of compList)
+      compEmb.push({ c, emb: await getEmbedding(c.title) });
+  }
+
+  for (const s of storeList) {
+    const tienda = { title: s.title, price: Number(s.price) || 0 };
+    const key = norm(s.title);
+    let externo = null,
+      match_method = null,
+      score = null;
+
+    // exact
+    const exactHit = compMap.get(key);
+    if (exactHit) {
+      externo = { title: exactHit.title, price: Number(exactHit.price) || 0 };
+      match_method = "exact";
+      score = 1;
+    }
+
+    // includes (mejor candidato: más barato)
+    if (!externo) {
+      const candidates = compNorm.filter(
+        (x) => x._k === key || x._k.includes(key) || key.includes(x._k)
+      );
+      if (candidates.length) {
+        const best = candidates.reduce(
+          (min, x) => (x._price < min._price ? x : min),
+          candidates[0]
+        );
+        externo = { title: best.title, price: best._price };
+        match_method = "includes";
+        score = 1;
+      }
+    }
+
+    // fuzzy
+    if (!externo) {
+      let best = null,
+        bestScore = 0;
+      for (const c of compList) {
+        const sc = jaccardTokens(s.title, c.title);
+        if (sc > bestScore) {
+          bestScore = sc;
+          best = c;
+        }
+      }
+      if (best && bestScore >= fuzzyThreshold) {
+        externo = { title: best.title, price: Number(best.price) || 0 };
+        match_method = "fuzzy";
+        score = +bestScore.toFixed(3);
+      }
+    }
+
+    // semantic (si habilitado)
+    if (!externo && compEmb) {
+      const embS = await getEmbedding(s.title);
+      let best = null,
+        bestScore = -1;
+      for (const { c, emb } of compEmb) {
+        const sc = cosineSimilarity(embS, emb);
+        if (sc > bestScore) {
+          bestScore = sc;
+          best = c;
+        }
+      }
+      if (best && bestScore >= semanticThreshold) {
+        externo = { title: best.title, price: Number(best.price) || 0 };
+        match_method = "semantic";
+        score = +bestScore.toFixed(3);
+      }
+    }
+
+    if (externo) {
+      out.push({
+        tienda,
+        externo,
+        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
+        match_method,
+        score,
+      });
+    }
+  }
+
   return out;
 }
 
@@ -282,7 +382,6 @@ async function compararProductos(
   if (!storeList.length) return [];
 
   // 2) datos competencia
-  // AHORA (asíncrona)
   const compList = await loadCompetitors(shopDomain, other);
   if (!compList.length) return [];
 
@@ -296,6 +395,16 @@ async function compararProductos(
       return match_fuzzy(storeList, compList, threshold ?? 0.6);
     case "semantic":
       return await match_semantic(storeList, compList, threshold ?? 0.8);
+    case "auto": {
+      const allowSemantic = process.env.ENABLE_SEMANTIC === "true";
+      const fuzzyThreshold = threshold ?? 0.6;
+      const semanticThreshold = Number(process.env.SEMANTIC_THRESHOLD || 0.8);
+      return await match_auto(storeList, compList, {
+        fuzzyThreshold,
+        semanticThreshold,
+        allowSemantic,
+      });
+    }
     default:
       return match_exact(storeList, compList);
   }
