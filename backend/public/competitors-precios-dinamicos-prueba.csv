@@ -1,5 +1,4 @@
 title,price,url,currency,source
-Samsung TV Neo QLED 4K 75" TQ75QN85DBTXXC,1189.15,https://www.elcorteingles.es/...,EUR,El Corte Inglés
-Cámara compacta Nikon Coolpix P1100,1349,https://www.elcorteingles.es/...,EUR,El Corte Inglés
-Horno multifunción AEG pirolítico,469,https://www.elcorteingles.es/...,EUR,El Corte Inglés
-Lavadora Bosh Serie 4,250,https://www.elcorteingles.es/...,EUR,El Corte Inglés
+Horno multifunción AEG pirolitico,469,https://competidor.example/horno,EUR,CompetidorDemo
+Cámara compacta Nikon Coolpix P1100,1349,https://competidor.example/nikon,EUR,CompetidorDemo
+Samsung TV Neo QLED 4K 75 pulgadas,1189.15,https://competidor.example/tv-samsung,EUR,CompetidorDemo
