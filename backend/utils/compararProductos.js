@@ -167,17 +167,29 @@ function match_exact(storeList, compList) {
 }
 
 function match_includes(storeList, compList) {
-  // igualdad o inclusión (a ⊆ b o b ⊆ a)
-  const compNorm = compList.map((c) => ({ ...c, _k: norm(c.title) }));
+  const compNorm = compList.map((c) => ({
+    ...c,
+    _k: norm(c.title),
+    _price: Number(c.price) || 0,
+  }));
+
   const out = [];
   for (const s of storeList) {
     const a = norm(s.title);
-    let hit = compNorm.find(
+
+    // candidatos: igualdad o inclusión en ambas direcciones
+    const candidates = compNorm.filter(
       (x) => x._k === a || x._k.includes(a) || a.includes(x._k)
     );
-    if (hit) {
+
+    if (candidates.length) {
+      // elige SIEMPRE el más barato si hay varios
+      const best = candidates.reduce(
+        (min, x) => (x._price < min._price ? x : min),
+        candidates[0]
+      );
       const tienda = { title: s.title, price: Number(s.price) || 0 };
-      const externo = { title: hit.title, price: Number(hit.price) || 0 };
+      const externo = { title: best.title, price: best._price };
       out.push({
         tienda,
         externo,
