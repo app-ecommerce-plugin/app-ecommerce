@@ -1,53 +1,77 @@
 // utils/compararProductos.js
-const fs = require('fs');
-const path = require('path');
-const fetch = require('node-fetch');
-const redisClient = require('../utils/redisClient');
+const fs = require("fs");
+const path = require("path");
+const fetch = require("node-fetch");
+const redisClient = require("../utils/redisClient");
 
 // (opcional) embeddings para modo "semantic"
 let getEmbedding, cosineSimilarity;
 try {
-  ({ getEmbedding, cosineSimilarity } = require('../utils/embeddings'));
+  ({ getEmbedding, cosineSimilarity } = require("../utils/embeddings"));
 } catch (_) {
   // si no existe utils/embeddings.js, el modo semantic no estará disponible
 }
 
 /* ----------------- Helpers ----------------- */
-const USE_LOCAL = () => process.env.USE_LOCAL_FILES === 'true';
+const USE_LOCAL = () => process.env.USE_LOCAL_FILES === "true";
 
-const norm = (s = '') =>
+const norm = (s = "") =>
   String(s)
     .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
 function loadLocalProducts(shopDomain) {
-  const fp = path.join(__dirname, '..', 'external_data', `${shopDomain}.json`);
-  const raw = fs.readFileSync(fp, 'utf8');
+  const fp = path.join(__dirname, "..", "external_data", `${shopDomain}.json`);
+  const raw = fs.readFileSync(fp, "utf8");
   const data = JSON.parse(raw);
   return Array.isArray(data.products) ? data.products : [];
 }
 
-function loadCompetitors(shopDomain, other = null) {
-  const base = path.join(__dirname, '..', 'external_data');
+// Carga el catálogo de competencia (ahora asíncrona):
+// 1) Intenta leer el consolidado en Redis: competitors_<shop>
+// 2) Fallback a ficheros locales en /external_data
+async function loadCompetitors(shopDomain, other = null) {
+  // 1) Consolidado en Redis
+  try {
+    const raw = await redisClient.get(`competitors_${shopDomain}`);
+    if (raw) {
+      const obj = JSON.parse(raw);
+      const items = Array.isArray(obj) ? obj : obj.items || [];
+      if (Array.isArray(items) && items.length) return items;
+    }
+  } catch (e) {
+    console.error("Error leyendo consolidado en Redis:", e.message);
+  }
 
+  // 2) Fallback a ficheros locales (lo que tenías antes, pero aceptando también arrays planos)
+  const base = path.join(__dirname, "..", "external_data");
   const candidates = other
     ? [path.join(base, `${other}.json`)]
     : [
         path.join(base, `${shopDomain}.competitors.json`),
         path.join(base, `${shopDomain}-competitors.json`),
-        path.join(base, `${shopDomain}.json`) // fallback
+        path.join(base, `${shopDomain}.json`), // fallback
       ];
 
   for (const fp of candidates) {
     try {
-      const raw = fs.readFileSync(fp, 'utf8');
+      const raw = fs.readFileSync(fp, "utf8");
       const data = JSON.parse(raw);
-      return Array.isArray(data.products) ? data.products : [];
-    } catch (_) { /* prueba siguiente */ }
+      const arr = Array.isArray(data.products)
+        ? data.products
+        : Array.isArray(data)
+        ? data
+        : [];
+      if (arr.length) return arr;
+    } catch (_) {
+      /* prueba el siguiente */
+    }
   }
+
   return [];
 }
 
@@ -66,21 +90,28 @@ async function getSelectedStoreProducts(shopDomain) {
     const raw = await redisClient.get(key);
     seleccion = raw ? JSON.parse(raw) : [];
   } catch (e) {
-    console.error('Redis selección err:', e.message);
+    console.error("Redis selección err:", e.message);
   }
   if (!Array.isArray(seleccion) || !seleccion.length) return [];
 
   // Si tenemos ya objetos con título/precio, basta con usarlos
-  if (typeof seleccion[0] === 'object' && seleccion[0] && 'title' in seleccion[0]) {
-    return seleccion.map(p => ({ title: p.title, price: Number(p.price) || 0 }));
+  if (
+    typeof seleccion[0] === "object" &&
+    seleccion[0] &&
+    "title" in seleccion[0]
+  ) {
+    return seleccion.map((p) => ({
+      title: p.title,
+      price: Number(p.price) || 0,
+    }));
   }
 
   // Si vinieran IDs "locales", resolvemos por JSON local
   if (USE_LOCAL()) {
     const all = loadLocalProducts(shopDomain);
     return all
-      .filter(p => seleccion.includes(p.id))
-      .map(p => ({ title: p.title, price: Number(p.price) || 0 }));
+      .filter((p) => seleccion.includes(p.id))
+      .map((p) => ({ title: p.title, price: Number(p.price) || 0 }));
   }
 
   // Si hay token Shopify y vinieran IDs de Shopify, los resolvemos por API
@@ -89,8 +120,8 @@ async function getSelectedStoreProducts(shopDomain) {
     // sin token: último recurso → JSON local
     const all = loadLocalProducts(shopDomain);
     return all
-      .filter(p => seleccion.includes(p.id))
-      .map(p => ({ title: p.title, price: Number(p.price) || 0 }));
+      .filter((p) => seleccion.includes(p.id))
+      .map((p) => ({ title: p.title, price: Number(p.price) || 0 }));
   }
 
   // IDs de Shopify → consultar API
@@ -98,14 +129,16 @@ async function getSelectedStoreProducts(shopDomain) {
   for (const id of seleccion) {
     try {
       const url = `https://${shopDomain}/admin/api/2023-04/products/${id}.json`;
-      const resp = await fetch(url, { headers: { 'X-Shopify-Access-Token': accessToken } });
+      const resp = await fetch(url, {
+        headers: { "X-Shopify-Access-Token": accessToken },
+      });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       const p = data.product;
       const price = p?.variants?.[0]?.price ?? 0;
       productos.push({ title: p.title, price: Number(price) || 0 });
     } catch (e) {
-      console.error('Shopify product err:', id, e.message);
+      console.error("Shopify product err:", id, e.message);
     }
   }
   return productos;
@@ -124,8 +157,9 @@ function match_exact(storeList, compList) {
       const tienda = { title: s.title, price: Number(s.price) || 0 };
       const externo = { title: hit.title, price: Number(hit.price) || 0 };
       out.push({
-        tienda, externo,
-        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2)
+        tienda,
+        externo,
+        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
       });
     }
   }
@@ -134,17 +168,20 @@ function match_exact(storeList, compList) {
 
 function match_includes(storeList, compList) {
   // igualdad o inclusión (a ⊆ b o b ⊆ a)
-  const compNorm = compList.map(c => ({ ...c, _k: norm(c.title) }));
+  const compNorm = compList.map((c) => ({ ...c, _k: norm(c.title) }));
   const out = [];
   for (const s of storeList) {
     const a = norm(s.title);
-    let hit = compNorm.find(x => x._k === a || x._k.includes(a) || a.includes(x._k));
+    let hit = compNorm.find(
+      (x) => x._k === a || x._k.includes(a) || a.includes(x._k)
+    );
     if (hit) {
       const tienda = { title: s.title, price: Number(s.price) || 0 };
       const externo = { title: hit.title, price: Number(hit.price) || 0 };
       out.push({
-        tienda, externo,
-        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2)
+        tienda,
+        externo,
+        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
       });
     }
   }
@@ -152,9 +189,9 @@ function match_includes(storeList, compList) {
 }
 
 function jaccardTokens(a, b) {
-  const A = new Set(norm(a).split(' ').filter(Boolean));
-  const B = new Set(norm(b).split(' ').filter(Boolean));
-  const inter = [...A].filter(x => B.has(x)).length;
+  const A = new Set(norm(a).split(" ").filter(Boolean));
+  const B = new Set(norm(b).split(" ").filter(Boolean));
+  const inter = [...A].filter((x) => B.has(x)).length;
   const uni = new Set([...A, ...B]).size;
   return uni ? inter / uni : 0;
 }
@@ -162,27 +199,34 @@ function jaccardTokens(a, b) {
 function match_fuzzy(storeList, compList, threshold = 0.6) {
   const out = [];
   for (const s of storeList) {
-    let best = null, bestScore = 0;
+    let best = null,
+      bestScore = 0;
     for (const c of compList) {
       const score = jaccardTokens(s.title, c.title);
-      if (score > bestScore) { bestScore = score; best = c; }
+      if (score > bestScore) {
+        bestScore = score;
+        best = c;
+      }
     }
     if (best && bestScore >= threshold) {
       const tienda = { title: s.title, price: Number(s.price) || 0 };
       const externo = { title: best.title, price: Number(best.price) || 0 };
       out.push({
-        tienda, externo,
+        tienda,
+        externo,
         diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
-        score: +bestScore.toFixed(3)
+        score: +bestScore.toFixed(3),
       });
     }
   }
   return out;
 }
 
-async function match_semantic(storeList, compList, threshold = 0.80) {
+async function match_semantic(storeList, compList, threshold = 0.8) {
   if (!getEmbedding || !cosineSimilarity) {
-    throw new Error('Modo semantic no disponible: falta utils/embeddings.js o OPENAI_API_KEY');
+    throw new Error(
+      "Modo semantic no disponible: falta utils/embeddings.js o OPENAI_API_KEY"
+    );
   }
   // embeddings + caché Redis (lo hace getEmbedding)
   const compEmb = [];
@@ -193,18 +237,23 @@ async function match_semantic(storeList, compList, threshold = 0.80) {
   const out = [];
   for (const s of storeList) {
     const embS = await getEmbedding(s.title);
-    let best = null, bestScore = -1;
+    let best = null,
+      bestScore = -1;
     for (const { c, emb } of compEmb) {
       const score = cosineSimilarity(embS, emb);
-      if (score > bestScore) { bestScore = score; best = c; }
+      if (score > bestScore) {
+        bestScore = score;
+        best = c;
+      }
     }
     if (best && bestScore >= threshold) {
       const tienda = { title: s.title, price: Number(s.price) || 0 };
       const externo = { title: best.title, price: Number(best.price) || 0 };
       out.push({
-        tienda, externo,
+        tienda,
+        externo,
         diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
-        score: +bestScore.toFixed(3)
+        score: +bestScore.toFixed(3),
       });
     }
   }
@@ -212,25 +261,29 @@ async function match_semantic(storeList, compList, threshold = 0.80) {
 }
 
 /* ----------------- Orquestador ----------------- */
-async function compararProductos(shopDomain, { mode = 'exact', threshold, other = null } = {}) {
+async function compararProductos(
+  shopDomain,
+  { mode = "exact", threshold, other = null } = {}
+) {
   // 1) datos tienda (siempre {title,price})
   const storeList = await getSelectedStoreProducts(shopDomain);
   if (!storeList.length) return [];
 
   // 2) datos competencia
-  const compList = loadCompetitors(shopDomain, other);
+  // AHORA (asíncrona)
+  const compList = await loadCompetitors(shopDomain, other);
   if (!compList.length) return [];
 
   // 3) matching por NOMBRE
   switch (mode) {
-    case 'exact':
+    case "exact":
       return match_exact(storeList, compList);
-    case 'includes':
+    case "includes":
       return match_includes(storeList, compList);
-    case 'fuzzy':
+    case "fuzzy":
       return match_fuzzy(storeList, compList, threshold ?? 0.6);
-    case 'semantic':
-      return await match_semantic(storeList, compList, threshold ?? 0.80);
+    case "semantic":
+      return await match_semantic(storeList, compList, threshold ?? 0.8);
     default:
       return match_exact(storeList, compList);
   }
