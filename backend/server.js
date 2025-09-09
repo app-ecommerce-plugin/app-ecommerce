@@ -6,6 +6,7 @@ const cors = require("cors");
 const productsRoutes = require("./routes/products");
 const comparisonRoutes = require("./routes/comparison");
 const authRoutes = require("./routes/auth");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +21,7 @@ app.use("/shopify/products", productsRoutes);
 app.use("/shopify/comparison", comparisonRoutes);
 app.use("/auth", authRoutes);
 app.use("/debug", require("./routes/debug"));
+app.use("/public", require("express").static(path.join(__dirname, "public")));
 
 const competitorsRoutes = require("./routes/competitors");
 app.use("/competitors", competitorsRoutes);
