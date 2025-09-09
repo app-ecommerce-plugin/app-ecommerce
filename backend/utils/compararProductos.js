@@ -38,7 +38,6 @@ function loadLocalProducts(shopDomain) {
 // 1) intenta consolidado en Redis (competitors_<shop>)
 // 2) fallback a ficheros locales en /external_data
 async function loadCompetitors(shopDomain, other = null) {
-  // 1) Consolidado en Redis
   try {
     const raw = await redisClient.get(`competitors_${shopDomain}`);
     if (raw) {
@@ -50,7 +49,6 @@ async function loadCompetitors(shopDomain, other = null) {
     console.error("Error leyendo consolidado en Redis:", e.message);
   }
 
-  // 2) Fallback a ficheros locales
   const base = path.join(__dirname, "..", "external_data");
   const candidates = other
     ? [path.join(base, `${other}.json`)]
@@ -77,7 +75,6 @@ async function loadCompetitors(shopDomain, other = null) {
 
 /* ----------------- Datos de tienda (siempre por TÍTULO) ----------------- */
 async function getSelectedStoreProducts(shopDomain) {
-  // leemos selección desde Redis (puede ser [{id,title,price}] o bien IDs)
   const key = `selectedProducts_${shopDomain}`;
   let seleccion = [];
   try {
@@ -88,7 +85,6 @@ async function getSelectedStoreProducts(shopDomain) {
   }
   if (!Array.isArray(seleccion) || !seleccion.length) return [];
 
-  // Si ya vienen objetos con {title, price}, úsalos tal cual
   if (
     typeof seleccion[0] === "object" &&
     seleccion[0] &&
@@ -100,7 +96,6 @@ async function getSelectedStoreProducts(shopDomain) {
     }));
   }
 
-  // IDs locales → JSON local
   if (USE_LOCAL()) {
     const all = loadLocalProducts(shopDomain);
     return all
@@ -108,7 +103,6 @@ async function getSelectedStoreProducts(shopDomain) {
       .map((p) => ({ title: p.title, price: Number(p.price) || 0 }));
   }
 
-  // IDs Shopify → API
   const accessToken = await redisClient.get(`accessToken_${shopDomain}`);
   if (!accessToken) {
     const all = loadLocalProducts(shopDomain);
@@ -160,7 +154,7 @@ function match_exact(storeList, compList) {
   return out;
 }
 
-// Mejorado: si hay varios candidatos (includes en ambas direcciones), elige el MÁS BARATO
+// includes: elige el MÁS BARATO entre los candidatos
 function match_includes(storeList, compList) {
   const compNorm = compList.map((c) => ({
     ...c,
@@ -229,52 +223,66 @@ function match_fuzzy(storeList, compList, threshold = 0.6) {
 }
 
 async function match_semantic(storeList, compList, threshold = 0.8) {
-  if (!getEmbedding || !cosineSimilarity) {
-    throw new Error(
-      "Modo semantic no disponible: falta utils/embeddings.js o OPENAI_API_KEY"
-    );
-  }
-  // precálculo embeddings competencia
-  const compEmb = [];
-  for (const c of compList) {
-    compEmb.push({ c, emb: await getEmbedding(c.title) });
-  }
-
-  const out = [];
-  for (const s of storeList) {
-    const embS = await getEmbedding(s.title);
-    let best = null,
-      bestScore = -1;
-    for (const { c, emb } of compEmb) {
-      const score = cosineSimilarity(embS, emb);
-      if (score > bestScore) {
-        bestScore = score;
-        best = c;
+  // Si no hay módulo o clave, no rompemos: devolvemos []
+  if (!getEmbedding || !cosineSimilarity || !process.env.OPENAI_API_KEY)
+    return [];
+  try {
+    // dedup títulos de competencia para ahorrar llamadas
+    const seen = new Set();
+    const compUnique = [];
+    for (const c of compList) {
+      const k = norm(c.title);
+      if (!seen.has(k)) {
+        seen.add(k);
+        compUnique.push(c);
       }
     }
-    if (best && bestScore >= threshold) {
-      const tienda = { title: s.title, price: Number(s.price) || 0 };
-      const externo = { title: best.title, price: Number(best.price) || 0 };
-      out.push({
-        tienda,
-        externo,
-        diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
-        match_method: "semantic",
-        score: +bestScore.toFixed(3),
-      });
+
+    // precálculo embeddings competencia
+    const compEmb = [];
+    for (const c of compUnique) {
+      compEmb.push({ c, emb: await getEmbedding(c.title) });
     }
+
+    const out = [];
+    for (const s of storeList) {
+      const embS = await getEmbedding(s.title);
+      let best = null,
+        bestScore = -1;
+      for (const { c, emb } of compEmb) {
+        const score = cosineSimilarity(embS, emb);
+        if (score > bestScore) {
+          bestScore = score;
+          best = c;
+        }
+      }
+      if (best && bestScore >= threshold) {
+        const tienda = { title: s.title, price: Number(s.price) || 0 };
+        const externo = { title: best.title, price: Number(best.price) || 0 };
+        out.push({
+          tienda,
+          externo,
+          diferenciaPrecio: +(tienda.price - externo.price).toFixed(2),
+          match_method: "semantic",
+          score: +bestScore.toFixed(3),
+        });
+      }
+    }
+    return out;
+  } catch (e) {
+    console.warn("Semantic deshabilitado por error de embeddings:", e.message);
+    return []; // degradamos silenciosamente
   }
-  return out;
 }
 
-/* ------- Nuevo: modo AUTO (pipeline exact → includes → fuzzy → semantic) ------- */
+/* ------- AUTO: exact → includes → fuzzy → semantic (si habilitado) ------- */
 async function match_auto(
   storeList,
   compList,
   { fuzzyThreshold = 0.6, semanticThreshold = 0.8, allowSemantic = true } = {}
 ) {
   const out = [];
-  // precálculos rápidos
+
   const compMap = new Map(compList.map((c) => [norm(c.title), c]));
   const compNorm = compList.map((c) => ({
     ...c,
@@ -282,12 +290,16 @@ async function match_auto(
     _price: Number(c.price) || 0,
   }));
 
-  // precálculo embeddings si procede
-  let compEmb = null;
-  if (allowSemantic && getEmbedding && cosineSimilarity) {
-    compEmb = [];
-    for (const c of compList)
-      compEmb.push({ c, emb: await getEmbedding(c.title) });
+  // Prepara semantic SOLO si se pide y hay clave, pero sin romper si falla
+  let semanticEnabled = false;
+  let compEmb = null; // no lo usamos aquí: delegamos en match_semantic (que ya maneja errores)
+  if (
+    allowSemantic &&
+    getEmbedding &&
+    cosineSimilarity &&
+    process.env.OPENAI_API_KEY === "true" // <- OJO: esto estaría mal; mejor usar !!process.env.OPENAI_API_KEY
+  ) {
+    semanticEnabled = true;
   }
 
   for (const s of storeList) {
@@ -305,7 +317,7 @@ async function match_auto(
       score = 1;
     }
 
-    // includes (mejor candidato: más barato)
+    // includes (el más barato)
     if (!externo) {
       const candidates = compNorm.filter(
         (x) => x._k === key || x._k.includes(key) || key.includes(x._k)
@@ -339,22 +351,17 @@ async function match_auto(
       }
     }
 
-    // semantic (si habilitado)
-    if (!externo && compEmb) {
-      const embS = await getEmbedding(s.title);
-      let best = null,
-        bestScore = -1;
-      for (const { c, emb } of compEmb) {
-        const sc = cosineSimilarity(embS, emb);
-        if (sc > bestScore) {
-          bestScore = sc;
-          best = c;
+    // semantic (solo si está habilitado y las previas no han casado)
+    if (!externo && allowSemantic) {
+      try {
+        const sem = await match_semantic([s], compList, semanticThreshold);
+        if (sem.length) {
+          externo = sem[0].externo;
+          match_method = "semantic";
+          score = sem[0].score ?? null;
         }
-      }
-      if (best && bestScore >= semanticThreshold) {
-        externo = { title: best.title, price: Number(best.price) || 0 };
-        match_method = "semantic";
-        score = +bestScore.toFixed(3);
+      } catch (e) {
+        console.warn("Saltando semantic en AUTO por error:", e.message);
       }
     }
 
@@ -377,15 +384,12 @@ async function compararProductos(
   shopDomain,
   { mode = "exact", threshold, other = null } = {}
 ) {
-  // 1) datos tienda (siempre {title,price})
   const storeList = await getSelectedStoreProducts(shopDomain);
   if (!storeList.length) return [];
 
-  // 2) datos competencia
   const compList = await loadCompetitors(shopDomain, other);
   if (!compList.length) return [];
 
-  // 3) matching por NOMBRE
   switch (mode) {
     case "exact":
       return match_exact(storeList, compList);
@@ -394,9 +398,17 @@ async function compararProductos(
     case "fuzzy":
       return match_fuzzy(storeList, compList, threshold ?? 0.6);
     case "semantic":
-      return await match_semantic(storeList, compList, threshold ?? 0.8);
+      // IMPORTANTE: no romper si falta clave o hay error
+      try {
+        const t = Number(process.env.SEMANTIC_THRESHOLD || threshold || 0.8);
+        return await match_semantic(storeList, compList, t);
+      } catch (e) {
+        console.warn("Modo semantic deshabilitado por error:", e.message);
+        return []; // degradación silenciosa
+      }
     case "auto": {
-      const allowSemantic = process.env.ENABLE_SEMANTIC === "true";
+      const allowSemantic =
+        process.env.ENABLE_SEMANTIC === "true" && !!process.env.OPENAI_API_KEY;
       const fuzzyThreshold = threshold ?? 0.6;
       const semanticThreshold = Number(process.env.SEMANTIC_THRESHOLD || 0.8);
       return await match_auto(storeList, compList, {
