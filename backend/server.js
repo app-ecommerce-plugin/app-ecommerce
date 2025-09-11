@@ -22,6 +22,8 @@ app.use("/shopify/comparison", comparisonRoutes);
 app.use("/auth", authRoutes);
 app.use("/debug", require("./routes/debug"));
 app.use("/public", require("express").static(path.join(__dirname, "public")));
+app.use('/shopify', require('./routes/recommend'));
+app.use('/shopify', require('./routes/applyPrices'));
 
 const competitorsRoutes = require("./routes/competitors");
 app.use("/competitors", competitorsRoutes);

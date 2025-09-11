@@ -27,4 +27,13 @@ router.get("/shopify/config", async (req, res) => {
   }
 });
 
+router.get("/debug/shops", async (_req, res) => {
+  try {
+    const shops = await redisClient.sMembers("shops");
+    res.json({ shops });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
