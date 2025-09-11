@@ -27,7 +27,7 @@ router.get("/shopify/config", async (req, res) => {
   }
 });
 
-router.get("/debug/shops", async (_req, res) => {
+router.get("/shops", async (_req, res) => {
   try {
     const shops = await redisClient.sMembers("shops");
     res.json({ shops });
