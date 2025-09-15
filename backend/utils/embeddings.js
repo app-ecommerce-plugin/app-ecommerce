@@ -1,35 +1,27 @@
-// utils/embeddings.js
-const crypto = require("crypto");
-const fetch = require("node-fetch"); // Node 18+ también tiene fetch global, pero así mantenemos homogeneidad
-const redisClient = require("./redisClient");
+// backend/utils/embeddings.js
+const fetch = require("node-fetch");
+const { checkUsageLimit } = require("./usageLimit");
+const openaiApiKey = process.env.OPENAI_API_KEY;
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_EMBEDDING_MODEL =
-  process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
-// TTL caché (segundos). 30 días por defecto.
-const EMB_TTL_SECONDS = Number(
-  process.env.EMB_TTL_SECONDS || 60 * 60 * 24 * 30
-);
-
-/** Normaliza texto para claves y para evitar duplicados triviales */
-function norm(s = "") {
-  return String(s)
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function sha256(s) {
-  return crypto.createHash("sha256").update(s).digest("hex");
-}
-
-/** Corta el texto para no enviar párrafos larguísimos al embedding (ahorro y límites) */
-function truncateForEmbedding(s, maxChars = 512) {
-  s = String(s || "");
-  if (s.length <= maxChars) return s;
-  return s.slice(0, maxChars);
+async function getEmbedding(text) {
+  // Verificar cuota antes de llamar a OpenAI
+  await checkUsageLimit();
+  if (!openaiApiKey) {
+    throw new Error("No hay API Key de OpenAI configurada");
+  }
+  const response = await fetch("https://api.openai.com/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openaiApiKey}`,
+    },
+    body: JSON.stringify({ input: text, model: "text-embedding-ada-002" }),
+  });
+  if (!response.ok) {
+    throw new Error(`OpenAI API error: ${response.status}`);
+  }
+  const data = await response.json();
+  return data.data[0]?.embedding || [];
 }
 
 /** Producto punto y norma para coseno */

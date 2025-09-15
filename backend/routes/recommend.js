@@ -4,8 +4,8 @@ const router = express.Router();
 const fetch = require("node-fetch");
 const redisClient = require("../utils/redisClient");
 
-const compararProductos = require("../utils/compararProductos"); // ya lo tienes
-const priceEngine = require("../engine/priceEngine"); // motor de sugerencias
+const compararProductos = require("../utils/compararProductos");
+const priceEngine = require("../engine/priceEngine");
 
 // Helpers Redis keys
 const keyPending = (shop) => `pendingRecommendations_${shop}`;
@@ -101,14 +101,13 @@ router.post("/recommend/review", async (req, res) => {
         suggestedPrice: r.suggestedPrice,
         match_method: r.match_method,
         score: r.score,
-        // El front resolverá variantId con /shopify/products (unir por title)
-        // o si ya los tienes guardados en selección, puedes añadirlo aquí.
+        // El front resolverá variantId con /shopify/products
       })),
     };
 
     await redisClient.set(keyPending(shop), JSON.stringify(pending), {
       EX: 60 * 60 * 4,
-    }); // 4h
+    }); // 4h TTL
     res.json({ success: true, pending });
   } catch (err) {
     console.error("Error review:", err);
@@ -136,31 +135,48 @@ router.post("/recommend/approve", async (req, res) => {
     if (!shop || !Array.isArray(items) || !items.length) {
       return res.status(400).json({ error: "Parámetros inválidos" });
     }
-    // items: [{variantId, newPrice, title?}]
+    // items: [{ variantId, newPrice, title }]
 
-    // aplicar
+    // Aplicar precios en Shopify
     const results = await applyPricesToShopify(shop, items);
 
-    // limpiar aplicados del pending + guardar en history
-    const rawPend = await redisClient.get(keyPending(shop));
-    const pending = rawPend ? JSON.parse(rawPend) : { items: [] };
+    // Remover del pending aquellos aplicados exitosamente y registrar en historial
+    let attempts = 0;
+    while (attempts < 3) {
+      attempts++;
+      await redisClient.watch(keyPending(shop));
+      const rawPend = await redisClient.get(keyPending(shop));
+      const pending = rawPend ? JSON.parse(rawPend) : { items: [] };
 
-    const appliedVariantIds = new Set(items.map((i) => String(i.variantId)));
-    pending.items = (pending.items || []).filter((p) => {
-      // si el front añadió variantId a cada pendiente, puedes filtrarlo por title o variantId
-      if (p.variantId) return !appliedVariantIds.has(String(p.variantId));
-      // fallback: si no hay variantId en pending, filtramos por título
-      const matchTitle = items.find((i) => i.title && i.title === p.title);
-      return !matchTitle;
-    });
+      // Filtrar del pending los items aplicados con éxito (ok true)
+      const successItems = results.filter((r) => r.ok);
+      if (successItems.length) {
+        const appliedIds = new Set(
+          successItems.map((r) => String(r.variantId))
+        );
+        pending.items = (pending.items || []).filter((p) => {
+          if (p.variantId) {
+            return !appliedIds.has(String(p.variantId));
+          }
+          // Si pending no tenía variantId, filtrar por título
+          return !successItems.find((it) => it.title === p.title);
+        });
+      }
 
-    await redisClient.set(keyPending(shop), JSON.stringify(pending), {
-      EX: 60 * 60 * 4,
-    });
-
-    const entry = { ts: Date.now(), action: "approve", items: results };
-    await redisClient.lPush(keyHistory(shop), JSON.stringify(entry));
-    await redisClient.lTrim(keyHistory(shop), 0, 199); // guarda últimas 200 acciones
+      // Preparar entrada de historial
+      const entry = { ts: Date.now(), action: "approve", items: results };
+      const multi = redisClient.multi();
+      multi.set(keyPending(shop), JSON.stringify(pending), { EX: 60 * 60 * 4 });
+      multi.lPush(keyHistory(shop), JSON.stringify(entry));
+      multi.lTrim(keyHistory(shop), 0, 199);
+      const execRes = await multi.exec();
+      if (execRes === null) {
+        // Si ocurrió una modificación concurrente, reintentar
+        continue;
+      }
+      // Éxito: salir del bucle
+      break;
+    }
 
     res.json({ updated: results });
   } catch (err) {
@@ -177,27 +193,42 @@ router.post("/recommend/reject", async (req, res) => {
       return res.status(400).json({ error: "Parámetros inválidos" });
     }
 
-    const rawPend = await redisClient.get(keyPending(shop));
-    const pending = rawPend ? JSON.parse(rawPend) : { items: [] };
+    // Remover del pending los ítems indicados y registrar en historial
+    let attempts = 0;
+    while (attempts < 3) {
+      attempts++;
+      await redisClient.watch(keyPending(shop));
+      const rawPend = await redisClient.get(keyPending(shop));
+      const pending = rawPend ? JSON.parse(rawPend) : { items: [] };
 
-    const ids = new Set(variantIds.map(String));
-    const tts = new Set(titles);
+      pending.items = (pending.items || []).filter((p) => {
+        if (p.variantId && variantIds.length) {
+          return !variantIds.map(String).includes(String(p.variantId));
+        }
+        if (titles.length) {
+          return !titles.includes(p.title);
+        }
+        return true;
+      });
 
-    pending.items = (pending.items || []).filter((p) => {
-      if (p.variantId && ids.size) return !ids.has(String(p.variantId));
-      if (tts.size) return !tts.has(p.title);
-      return true;
+      const entry = { ts: Date.now(), action: "reject", variantIds, titles };
+      const multi = redisClient.multi();
+      multi.set(keyPending(shop), JSON.stringify(pending), { EX: 60 * 60 * 4 });
+      multi.lPush(keyHistory(shop), JSON.stringify(entry));
+      multi.lTrim(keyHistory(shop), 0, 199);
+      const execRes = await multi.exec();
+      if (execRes === null) {
+        continue; // reintentar si hubo cambio concurrente
+      }
+      break;
+    }
+
+    res.json({
+      success: true,
+      pendingCount: (await redisClient.get(keyPending(shop)))
+        ? JSON.parse(await redisClient.get(keyPending(shop))).items.length
+        : 0,
     });
-
-    await redisClient.set(keyPending(shop), JSON.stringify(pending), {
-      EX: 60 * 60 * 4,
-    });
-
-    const entry = { ts: Date.now(), action: "reject", variantIds, titles };
-    await redisClient.lPush(keyHistory(shop), JSON.stringify(entry));
-    await redisClient.lTrim(keyHistory(shop), 0, 199);
-
-    res.json({ success: true, pendingCount: pending.items.length });
   } catch (err) {
     console.error("Error reject:", err);
     res.status(500).json({ error: "No se pudo rechazar" });

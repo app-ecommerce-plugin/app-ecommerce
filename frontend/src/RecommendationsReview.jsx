@@ -3,10 +3,13 @@ import { useEffect, useState } from "react";
 export default function RecommendationsReview({ shop }) {
   const [pending, setPending] = useState([]);
   const [prods, setProds] = useState([]);
-  const [selected, setSelected] = useState({}); // variantId -> boolean
-  const API = import.meta.env.VITE_BACKEND_URL; // ya lo usas en tu app
+  const [selected, setSelected] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [notif, setNotif] = useState(null);
+  const API = import.meta.env.VITE_BACKEND_URL;
 
   async function load() {
+    setLoading(true);
     const p = await fetch(`${API}/shopify/recommend/pending?shop=${shop}`).then(
       (r) => r.json()
     );
@@ -15,11 +18,20 @@ export default function RecommendationsReview({ shop }) {
       r.json()
     );
     setProds(pr.products || []);
+    setLoading(false);
   }
 
   useEffect(() => {
     load();
   }, [shop]);
+
+  // Ocultar notificación después de 3 segundos
+  useEffect(() => {
+    if (notif) {
+      const timer = setTimeout(() => setNotif(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [notif]);
 
   function toMapByTitle(arr) {
     const m = new Map();
@@ -40,8 +52,24 @@ export default function RecommendationsReview({ shop }) {
     };
   });
 
+  const selectableIds = rows.filter((r) => r.variantId).map((r) => r.variantId);
+  const allSelected =
+    selectableIds.length > 0 && selectableIds.every((id) => selected[id]);
+
   function toggle(vId) {
     setSelected((s) => ({ ...s, [vId]: !s[vId] }));
+  }
+
+  function toggleAll() {
+    if (allSelected) {
+      setSelected({});
+    } else {
+      const newSelected = {};
+      for (const vId of selectableIds) {
+        newSelected[vId] = true;
+      }
+      setSelected(newSelected);
+    }
   }
 
   async function approve() {
@@ -53,8 +81,12 @@ export default function RecommendationsReview({ shop }) {
         title: r.title,
       }));
 
-    if (!items.length) return alert("Selecciona al menos un producto");
+    if (!items.length) {
+      setNotif({ text: "Selecciona al menos un producto", error: true });
+      return;
+    }
 
+    setLoading(true);
     const body = { shop, items };
     const resp = await fetch(`${API}/shopify/recommend/approve`, {
       method: "POST",
@@ -62,16 +94,21 @@ export default function RecommendationsReview({ shop }) {
       body: JSON.stringify(body),
     }).then((r) => r.json());
 
-    alert(`Aplicados: ${resp.updated?.filter((x) => x.ok).length || 0}`);
+    setNotif({
+      text: `Aplicados: ${resp.updated?.filter((x) => x.ok).length || 0}`,
+      error: false,
+    });
     load();
   }
 
   async function reject(title) {
+    setLoading(true);
     await fetch(`${API}/shopify/recommend/reject`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shop, titles: [title] }),
     });
+    setNotif({ text: "Recomendación rechazada", error: false });
     load();
   }
 
@@ -81,14 +118,34 @@ export default function RecommendationsReview({ shop }) {
       <button
         className="px-3 py-2 rounded bg-slate-700 text-white mb-3"
         onClick={load}
+        disabled={loading}
       >
         Recargar pendientes
       </button>
 
+      {loading && <div className="text-center my-2">Cargando...</div>}
+
+      {notif && (
+        <div
+          className={`${
+            notif.error ? "bg-red-600" : "bg-green-600"
+          } text-white p-2 mb-3`}
+        >
+          {notif.text}
+        </div>
+      )}
+
       <table className="min-w-full text-sm">
         <thead>
           <tr className="text-left border-b border-gray-700">
-            <th></th>
+            <th>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                disabled={loading}
+                onChange={toggleAll}
+              />
+            </th>
             <th>Producto</th>
             <th>Actual</th>
             <th>Competencia</th>
@@ -104,6 +161,7 @@ export default function RecommendationsReview({ shop }) {
                   <input
                     type="checkbox"
                     checked={!!selected[r.variantId]}
+                    disabled={loading}
                     onChange={() => toggle(r.variantId)}
                   />
                 ) : (
@@ -118,6 +176,7 @@ export default function RecommendationsReview({ shop }) {
                 <button
                   className="text-red-400 underline"
                   onClick={() => reject(r.title)}
+                  disabled={loading}
                 >
                   Rechazar
                 </button>
@@ -131,6 +190,7 @@ export default function RecommendationsReview({ shop }) {
         <button
           className="px-4 py-2 rounded bg-emerald-600 text-white"
           onClick={approve}
+          disabled={loading}
         >
           Aplicar seleccionados
         </button>
