@@ -1,13 +1,36 @@
-const redis = require('redis');
+// backend/utils/redisClient.js
+const { createClient } = require("redis");
 
-// URL de Redis proveniente de entorno o por defecto local
-const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_URL = process.env.REDIS_URL;
+if (!REDIS_URL) {
+  // No reducimos líneas: dejamos este throw para fallar rápido en despliegue mal configurado.
+  throw new Error("Falta REDIS_URL en variables de entorno");
+}
 
-const client = redis.createClient({ url: redisUrl });
+const client = createClient({ url: REDIS_URL });
 
-// Conectar a Redis
-client.connect()
-  .then(() => console.log('Conectado a Redis exitosamente'))
-  .catch(err => console.error('Error al conectar a Redis:', err));
+client.on("error", (err) => {
+  console.error("Redis error:", err);
+});
 
-module.exports = client;
+let isConnecting = false;
+async function ensureConnected() {
+  if (!client.isOpen && !isConnecting) {
+    isConnecting = true;
+    await client.connect();
+    isConnecting = false;
+  }
+}
+
+// Reexport helpers de redis v4 ya conectados
+module.exports = new Proxy(
+  {},
+  {
+    get: (_, prop) => {
+      return async (...args) => {
+        await ensureConnected();
+        return client[prop](...args);
+      };
+    },
+  }
+);

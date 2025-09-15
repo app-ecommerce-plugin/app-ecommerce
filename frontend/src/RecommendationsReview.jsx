@@ -1,3 +1,4 @@
+// frontend/src/RecommendationsReview.jsx
 import { useEffect, useState } from "react";
 
 export default function RecommendationsReview({ shop }) {
@@ -10,26 +11,30 @@ export default function RecommendationsReview({ shop }) {
 
   async function load() {
     setLoading(true);
-    const p = await fetch(`${API}/shopify/recommend/pending?shop=${shop}`).then(
-      (r) => r.json()
-    );
-    setPending(p.items || []);
-    const pr = await fetch(`${API}/shopify/products?shop=${shop}`).then((r) =>
-      r.json()
-    );
-    setProds(pr.products || []);
-    setLoading(false);
+    try {
+      const p = await fetch(
+        `${API}/shopify/recommend/pending?shop=${encodeURIComponent(shop)}`
+      ).then((r) => r.json());
+      setPending(Array.isArray(p.items) ? p.items : []);
+      const pr = await fetch(
+        `${API}/shopify/products?shop=${encodeURIComponent(shop)}`
+      ).then((r) => r.json());
+      setProds(Array.isArray(pr.products) ? pr.products : []);
+    } catch (e) {
+      setNotif({ text: "Error cargando datos", error: true });
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     load();
   }, [shop]);
 
-  // Ocultar notificación después de 3 segundos
   useEffect(() => {
     if (notif) {
-      const timer = setTimeout(() => setNotif(null), 3000);
-      return () => clearTimeout(timer);
+      const t = setTimeout(() => setNotif(null), 3000);
+      return () => clearTimeout(t);
     }
   }, [notif]);
 
@@ -48,7 +53,7 @@ export default function RecommendationsReview({ shop }) {
       currentPrice: prod?.price ?? p.currentPrice,
       competitorPrice: p.competitorPrice,
       suggestedPrice: p.suggestedPrice,
-      variantId: prod?.variantId,
+      variantId: prod?.variantId || null,
     };
   });
 
@@ -64,11 +69,9 @@ export default function RecommendationsReview({ shop }) {
     if (allSelected) {
       setSelected({});
     } else {
-      const newSelected = {};
-      for (const vId of selectableIds) {
-        newSelected[vId] = true;
-      }
-      setSelected(newSelected);
+      const next = {};
+      for (const vId of selectableIds) next[vId] = true;
+      setSelected(next);
     }
   }
 
@@ -87,29 +90,39 @@ export default function RecommendationsReview({ shop }) {
     }
 
     setLoading(true);
-    const body = { shop, items };
-    const resp = await fetch(`${API}/shopify/recommend/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json());
-
-    setNotif({
-      text: `Aplicados: ${resp.updated?.filter((x) => x.ok).length || 0}`,
-      error: false,
-    });
-    load();
+    try {
+      const resp = await fetch(`${API}/shopify/recommend/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shop, items }),
+      }).then((r) => r.json());
+      const okCount = Array.isArray(resp.updated)
+        ? resp.updated.filter((x) => x.ok).length
+        : 0;
+      setNotif({ text: `Aplicados: ${okCount}`, error: false });
+      await load();
+    } catch (e) {
+      setNotif({ text: "Error aplicando precios", error: true });
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function reject(title) {
     setLoading(true);
-    await fetch(`${API}/shopify/recommend/reject`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shop, titles: [title] }),
-    });
-    setNotif({ text: "Recomendación rechazada", error: false });
-    load();
+    try {
+      await fetch(`${API}/shopify/recommend/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shop, titles: [title] }),
+      });
+      setNotif({ text: "Recomendación rechazada", error: false });
+      await load();
+    } catch {
+      setNotif({ text: "Error rechazando recomendación", error: true });
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
