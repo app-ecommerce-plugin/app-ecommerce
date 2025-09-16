@@ -10,6 +10,7 @@ const keyPending = (shop) => `pendingRecommendations_${shop}`;
 const keyHistory = (shop) => `recommendHistory_${shop}`;
 const shopsSetKey = "shops";
 
+
 router.get("/shopify/config", validateShopParam, async (req, res) => {
   try {
     const shop = req.shop;

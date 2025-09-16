@@ -3,7 +3,7 @@ const fetch = require("node-fetch");
 const Joi = require("joi");
 
 const redis = require("../utils/redisClient");
-const { decrypt } = require("../utils/crypto");
+const { getAccessTokenAuto } = require("../utils/crypto"); // ⬅️ CAMBIO
 const { validateShopParam } = require("../middleware/shopValidation");
 const {
   ensureShopAccess,
@@ -16,9 +16,8 @@ const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2023-04";
 
 // Helpers
 async function getDecryptedToken(shop) {
-  const enc = await redis.get(tokenKey(shop));
-  if (!enc) throw new Error("Token no encontrado");
-  return decrypt(enc);
+  // ⬅️ AHORA usa la versión “auto” compatible
+  return getAccessTokenAuto(shop);
 }
 
 function parseLinkHeader(link) {

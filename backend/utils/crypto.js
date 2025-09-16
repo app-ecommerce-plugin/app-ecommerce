@@ -1,14 +1,28 @@
 // backend/utils/crypto.js
 const crypto = require("crypto");
+const redis = require("./redisClient"); // PARA auto-migración (necesario)
+const { tokenKey } = require("../middleware/ensureShopAccess"); // PARA auto-migración
 
 const ENC_KEY_B64 = process.env.ENCRYPTION_KEY; // 32 bytes en base64
 if (!ENC_KEY_B64) {
-  // Mantengo verificación estricta: evita almacenar tokens en claro accidentalmente.
   console.warn(
     "[WARN] ENCRYPTION_KEY no definido: no se podrá cifrar/descifrar tokens."
   );
 }
 const ENC_KEY = ENC_KEY_B64 ? Buffer.from(ENC_KEY_B64, "base64") : null;
+
+// ----- Utilidades internas -----
+function isLikelyEncrypted(jsonStr) {
+  // Formato esperado: JSON con iv/tag/data/alg/ver
+  if (!jsonStr) return false;
+  if (jsonStr[0] !== "{" || jsonStr[jsonStr.length - 1] !== "}") return false;
+  try {
+    const obj = JSON.parse(jsonStr);
+    return !!(obj && obj.iv && obj.tag && obj.data && obj.alg);
+  } catch {
+    return false;
+  }
+}
 
 function encrypt(text) {
   if (!ENC_KEY) throw new Error("ENCRYPTION_KEY no configurado");
@@ -41,4 +55,42 @@ function decrypt(payloadJson) {
   return plaintext.toString("utf8");
 }
 
-module.exports = { encrypt, decrypt };
+/**
+ * getAccessTokenAuto(shop)
+ * - Lee el token en Redis.
+ * - Si está cifrado (JSON válido), lo descifra y lo devuelve.
+ * - Si está en texto plano (p.ej. "shpua_..."), lo devuelve, y SI hay ENCRYPTION_KEY:
+ *     - lo cifra y lo guarda de vuelta (auto-migración).
+ */
+async function getAccessTokenAuto(shop) {
+  const key = tokenKey(shop);
+  const raw = await redis.get(key);
+  if (!raw) throw new Error("Token no encontrado");
+
+  // Caso 1: ya cifrado
+  if (isLikelyEncrypted(raw)) {
+    if (!ENC_KEY)
+      throw new Error("ENCRYPTION_KEY no configurado (no puedo descifrar)");
+    const token = decrypt(raw);
+    return token;
+  }
+
+  // Caso 2: texto plano (legacy)
+  const legacyToken = raw; // ya es el access_token
+  if (ENC_KEY) {
+    try {
+      const enc = encrypt(legacyToken);
+      await redis.set(key, enc); // migración silenciosa
+      // (no cambiamos el valor que devolvemos a la app)
+    } catch (e) {
+      console.warn("[WARN] No se pudo re-cifrar el token legacy:", e.message);
+    }
+  } else {
+    console.warn(
+      "[WARN] Token legacy en texto plano y ENCRYPTION_KEY ausente."
+    );
+  }
+  return legacyToken;
+}
+
+module.exports = { encrypt, decrypt, getAccessTokenAuto };
