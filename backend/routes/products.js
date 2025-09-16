@@ -1,4 +1,3 @@
-// backend/routes/products.js
 const express = require("express");
 const fetch = require("node-fetch");
 const Joi = require("joi");
@@ -15,7 +14,7 @@ const router = express.Router();
 
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2023-04";
 
-// --- Helpers
+// Helpers
 async function getDecryptedToken(shop) {
   const enc = await redis.get(tokenKey(shop));
   if (!enc) throw new Error("Token no encontrado");
@@ -24,7 +23,6 @@ async function getDecryptedToken(shop) {
 
 function parseLinkHeader(link) {
   if (!link) return {};
-  // Formato: <url1>; rel="previous", <url2>; rel="next"
   const parts = link.split(",");
   const out = {};
   for (const p of parts) {
@@ -56,8 +54,7 @@ async function fetchAllProducts(shop, token) {
     url = parsed.next || null;
   }
 
-  // Normaliza a lo que usa la app (primera variante)
-  const list = products.map((p) => {
+  return products.map((p) => {
     const v = (p.variants && p.variants[0]) || {};
     return {
       id: p.id,
@@ -66,11 +63,9 @@ async function fetchAllProducts(shop, token) {
       variantId: v.id || null,
     };
   });
-
-  return list;
 }
 
-// --- GET /shopify/products?shop=...
+// GET /products?shop=...
 router.get(
   "/products",
   validateShopParam,
@@ -82,7 +77,7 @@ router.get(
       const list = await fetchAllProducts(shop, token);
       res.json({ products: list });
     } catch (err) {
-      console.error("GET products error:", err);
+      console.error("GET /products error:", err);
       res.status(500).json({ error: "No se pudieron obtener productos" });
     }
   }
@@ -93,23 +88,22 @@ const selectSchema = Joi.object({
   productIds: Joi.array().items(Joi.number().unsafe()).min(1).required(),
 });
 
-// --- POST /shopify/products/selected
+// POST /products/selected
 router.post("/products/selected", async (req, res) => {
   try {
-    const { error } = selectSchema.validate(req.body);
+    const { error, value } = selectSchema.validate(req.body);
     if (error) return res.status(400).json({ error: "Body inválido" });
 
-    const { shop, productIds } = req.body;
+    const { shop, productIds } = value;
     const token = await getDecryptedToken(shop);
 
-    // Enriquecer cada producto con datos actuales (id, title, price, variantId)
     const all = await fetchAllProducts(shop, token);
     const chosen = all.filter((p) => productIds.includes(p.id));
 
     await redis.set(`selectedProducts_${shop}`, JSON.stringify(chosen));
-    return res.json({ success: true, count: chosen.length, items: chosen });
+    res.json({ success: true, count: chosen.length, items: chosen });
   } catch (err) {
-    console.error("POST selected error:", err);
+    console.error("POST /products/selected error:", err);
     res.status(500).json({ error: "No se pudo guardar selección" });
   }
 });
