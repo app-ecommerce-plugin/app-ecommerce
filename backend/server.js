@@ -6,7 +6,8 @@ const helmet = require("helmet");
 const authRoutes = require("./routes/auth");
 const productsRoutes = require("./routes/products");
 const recommendRoutes = require("./routes/recommend");
-const debugRoutes = require("./routes/debug"); // NUEVO (si no lo tienes, crea el archivo que te di antes)
+const comparisonRoutes = require("./routes/comparison"); // NUEVO
+const debugRoutes = require("./routes/debug"); // DEBUG extendido
 
 const app = express();
 
@@ -22,22 +23,24 @@ app.use(express.json());
 // Healthcheck
 app.get("/", (_req, res) => res.send("Backend de Shopify activo"));
 
-// Prefijo oficial
+// ----- Prefijo oficial
 app.use("/shopify", authRoutes);
-app.use("/shopify", productsRoutes); // <- monta aquí
+app.use("/shopify", productsRoutes);
 app.use("/shopify", recommendRoutes);
+app.use("/shopify", comparisonRoutes);
 
-// Alias sin prefijo (compatibilidad)
+// ----- Alias sin prefijo (compatibilidad)
 app.use("/", productsRoutes);
 app.use("/", recommendRoutes);
 
-// Debug
+// ----- Alias de AUTH bajo /auth (tú probaste /auth/shopify/callback)
+app.use("/auth", authRoutes);
+
+// ----- Debug
 app.use("/debug", debugRoutes);
 
 // 404 controlado
 app.use((req, res) => res.status(404).json({ error: "Ruta no encontrada" }));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Backend escuchando en :${PORT}`);
-});
+app.listen(PORT, () => console.log(`Backend escuchando en :${PORT}`));
