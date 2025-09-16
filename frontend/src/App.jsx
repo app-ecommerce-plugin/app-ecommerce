@@ -1,7 +1,8 @@
 // src/App.jsx
 import "./App.css";
 import ProductManager from "./ProductManager";
-import RecommendationsReview from "./RecommendationsReview"; // nuevo
+import RecommendationsReview from "./RecommendationsReview";
+import Comparison from "./Comparison"; // ⬅️ NUEVO
 import { useState } from "react";
 
 function App() {
@@ -82,8 +83,11 @@ function App() {
     <>
       <h1>Frontend conectado a Backend (Render)</h1>
 
-      {/* Gestión de selección de productos (como ya tenías) */}
+      {/* Gestión de selección de productos */}
       <ProductManager apiUrl={apiUrl} shop={shopParam} />
+
+      {/* Comparación con competencia (NUEVO) */}
+      <Comparison apiUrl={apiUrl} shop={shopParam} />
 
       <hr />
 
