@@ -6,8 +6,8 @@ const helmet = require("helmet");
 const authRoutes = require("./routes/auth");
 const productsRoutes = require("./routes/products");
 const recommendRoutes = require("./routes/recommend");
-const comparisonRoutes = require("./routes/comparison"); // NUEVO
-const debugRoutes = require("./routes/debug"); // DEBUG extendido
+const comparisonRoutes = require("./routes/comparison");
+const debugRoutes = require("./routes/debug");
 
 const app = express();
 
@@ -33,8 +33,13 @@ app.use("/shopify", comparisonRoutes);
 app.use("/", productsRoutes);
 app.use("/", recommendRoutes);
 
-// ----- Alias de AUTH bajo /auth (tú probaste /auth/shopify/callback)
-app.use("/auth", authRoutes);
+// ----- Alias de AUTH bajo /auth (compatibilidad puntual)
+// Nota: la ruta canónica del callback es /shopify/auth/callback.
+// Este alias redirige cualquier /auth/shopify/callback -> /shopify/auth/callback preservando querystring.
+app.get("/auth/shopify/callback", (req, res) => {
+  const q = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+  return res.redirect(302, `/shopify/auth/callback${q}`);
+});
 
 // ----- Debug
 app.use("/debug", debugRoutes);
