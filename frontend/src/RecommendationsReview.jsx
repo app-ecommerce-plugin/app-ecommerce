@@ -1,27 +1,27 @@
 // frontend/src/RecommendationsReview.jsx
 import { useEffect, useState } from "react";
 
-export default function RecommendationsReview({ shop }) {
+export default function RecommendationsReview({ apiUrl, shop }) {
   const [pending, setPending] = useState([]);
   const [prods, setProds] = useState([]);
   const [selected, setSelected] = useState({});
   const [loading, setLoading] = useState(false);
   const [notif, setNotif] = useState(null);
-  const API = import.meta.env.VITE_BACKEND_URL;
 
   async function load() {
     setLoading(true);
     try {
       const p = await fetch(
-        `${API}/shopify/recommend/pending?shop=${encodeURIComponent(shop)}`
+        `${apiUrl}/shopify/recommend/pending?shop=${encodeURIComponent(shop)}`
       ).then((r) => r.json());
       setPending(Array.isArray(p.items) ? p.items : []);
+
       const pr = await fetch(
-        `${API}/shopify/products?shop=${encodeURIComponent(shop)}`
+        `${apiUrl}/shopify/products?shop=${encodeURIComponent(shop)}`
       ).then((r) => r.json());
       setProds(Array.isArray(pr.products) ? pr.products : []);
-    } catch (e) {
-      setNotif({ text: "Error cargando datos", error: true });
+    } catch {
+      setNotif({ text: "Error cargando pendientes/productos", error: true });
     } finally {
       setLoading(false);
     }
@@ -29,6 +29,7 @@ export default function RecommendationsReview({ shop }) {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shop]);
 
   useEffect(() => {
@@ -91,17 +92,18 @@ export default function RecommendationsReview({ shop }) {
 
     setLoading(true);
     try {
-      const resp = await fetch(`${API}/shopify/recommend/approve`, {
+      const resp = await fetch(`${apiUrl}/shopify/recommend/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shop, items }),
       }).then((r) => r.json());
+
       const okCount = Array.isArray(resp.updated)
         ? resp.updated.filter((x) => x.ok).length
         : 0;
       setNotif({ text: `Aplicados: ${okCount}`, error: false });
       await load();
-    } catch (e) {
+    } catch {
       setNotif({ text: "Error aplicando precios", error: true });
     } finally {
       setLoading(false);
@@ -111,7 +113,7 @@ export default function RecommendationsReview({ shop }) {
   async function reject(title) {
     setLoading(true);
     try {
-      await fetch(`${API}/shopify/recommend/reject`, {
+      await fetch(`${apiUrl}/shopify/recommend/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ shop, titles: [title] }),
@@ -196,6 +198,13 @@ export default function RecommendationsReview({ shop }) {
               </td>
             </tr>
           ))}
+          {rows.length === 0 && !loading && (
+            <tr>
+              <td colSpan={6} className="py-4 text-center text-gray-400">
+                No hay recomendaciones pendientes.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
 

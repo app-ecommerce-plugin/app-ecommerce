@@ -1,142 +1,172 @@
-// ProductManager.jsx
+// frontend/src/ProductManager.jsx
 import { useEffect, useState } from "react";
 
-function ProductManager({ apiUrl, shop }) {
+export default function ProductManager({ apiUrl, shop }) {
+  const [loading, setLoading] = useState(false);
+  const [notif, setNotif] = useState(null);
   const [products, setProducts] = useState([]);
-  const [selected, setSelected] = useState([]);
-  const [message, setMessage] = useState("");
-  const [compareResult, setCompareResult] = useState(null);
+  const [selected, setSelected] = useState({}); // id -> bool
+
+  // Notificaciones 3s
+  useEffect(() => {
+    if (notif) {
+      const t = setTimeout(() => setNotif(null), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [notif]);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `${apiUrl}/shopify/products?shop=${encodeURIComponent(shop)}`
+      );
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`GET /products ${res.status}: ${txt}`);
+      }
+      const data = await res.json();
+      const list = Array.isArray(data.products) ? data.products : [];
+      setProducts(list);
+
+      const raw = localStorage.getItem(`sel:${shop}`);
+      if (raw) setSelected(JSON.parse(raw));
+    } catch (e) {
+      console.error(e);
+      setNotif({ text: "Error cargando productos", error: true });
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    if (!shop) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shop]);
 
-    // Mensaje de backend
-    fetch(`${apiUrl}/`)
-      .then((res) => res.text())
-      .then(setMessage)
-      .catch((err) => setMessage(err.message));
+  const allIds = products.map((p) => p.id);
+  const allSelected = allIds.length > 0 && allIds.every((id) => selected[id]);
 
-    // Obtener productos
-    fetch(`${apiUrl}/shopify/products?shop=${shop}`)
-      .then((res) => res.json())
-      .then((data) => setProducts(data.products || []))
-      .catch(console.error);
+  function toggleOne(id) {
+    setSelected((s) => ({ ...s, [id]: !s[id] }));
+  }
 
-    // Obtener productos seleccionados
-    fetch(`${apiUrl}/shopify/products/selected?shop=${shop}`)
-      .then((res) => res.json())
-      .then((data) => {
-        const ids = (data.selectedProducts || []).map((p) => p.id ?? p);
-        setSelected(ids);
-      })
-      .catch(console.warn);
-  }, [apiUrl, shop]);
+  function toggleAll() {
+    if (allSelected) {
+      setSelected({});
+    } else {
+      const next = {};
+      for (const id of allIds) next[id] = true;
+      setSelected(next);
+    }
+  }
 
-  const toggleSelection = (productId) => {
-    const updated = selected.includes(productId)
-      ? selected.filter((id) => id !== productId)
-      : [...selected, productId];
-    setSelected(updated);
-  };
+  async function saveSelection() {
+    const productIds = Object.entries(selected)
+      .filter(([_, v]) => v)
+      .map(([k]) => Number(k));
 
-  const saveSelection = () => {
-    fetch(`${apiUrl}/shopify/products/selected`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        shop,
-        selectedProducts: selected, // Enviar solo los IDs, no objetos completos
-      }),
-    })
-      .then((res) =>
-        res.ok ? alert("✅ Selección guardada") : alert("❌ Error al guardar")
-      )
-      .catch(console.error);
-  };
+    if (!productIds.length) {
+      setNotif({ text: "Selecciona al menos un producto", error: true });
+      return;
+    }
 
-  const compararPrecios = () => {
-    fetch(`${apiUrl}/shopify/comparison?shop=${shop}&mode=title`)
-      .then((res) => res.json())
-      .then(({ comparaciones }) => {
-        if (!comparaciones?.length) {
-          alert("Sin coincidencias");
-          return;
-        }
-
-        const resumen = comparaciones
-          .map(
-            (c) =>
-              `${c.title}\n  Tienda: ${c.storePrice}€  Competencia: ${
-                c.competitorPrice
-              }€  Δ ${c.difference.toFixed(2)}€`
-          )
-          .join("\n\n");
-
-        alert("📊 Comparación:\n\n" + resumen);
-      })
-      .catch((err) => alert("❌ Error: " + err.message));
-  };
-
-  const limpiarComparacion = () => {
-    setCompareResult(null);
-  };
+    setLoading(true);
+    try {
+      const res = await fetch(`${apiUrl}/shopify/products/selected`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shop, productIds }),
+      });
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`POST /products/selected ${res.status}: ${txt}`);
+      }
+      const data = await res.json();
+      setNotif({ text: `Guardados: ${data.count} productos`, error: false });
+      localStorage.setItem(`sel:${shop}`, JSON.stringify(selected));
+    } catch (e) {
+      console.error(e);
+      setNotif({ text: "Error al guardar", error: true });
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <>
-      <h2>🛒 Productos disponibles</h2>
-      <ul>
-        {products.map((p) => (
-          <li key={p.id}>
-            <input
-              type="checkbox"
-              checked={selected.includes(p.id)}
-              onChange={() => toggleSelection(p.id)}
-            />
-            {p.title}
-          </li>
-        ))}
-      </ul>
+    <div className="p-4 border border-gray-700 rounded">
+      <h3 className="text-xl mb-2">Productos disponibles</h3>
 
-      <button onClick={saveSelection}>💾 Guardar selección</button>
-      <button onClick={compararPrecios}>📊 Comparar con otra tienda</button>
-
-      <h2>✅ Productos seleccionados</h2>
-      <ul>
-        {selected.map((id) => {
-          const product = products.find((p) => p.id === id);
-          return <li key={id}>{product?.title || id}</li>;
-        })}
-      </ul>
-
-      {compareResult && (
-        <>
-          <h2>🔎 Resultado de comparación</h2>
-          <button onClick={limpiarComparacion}>🧹 Limpiar resultados</button>
-
-          <h3>🟡 Comunes</h3>
-          <ul>
-            {compareResult.comunes.map((id) => (
-              <li key={id}>{id}</li>
-            ))}
-          </ul>
-
-          <h3>🔴 Solo en esta tienda</h3>
-          <ul>
-            {compareResult.soloEn1.map((id) => (
-              <li key={id}>{id}</li>
-            ))}
-          </ul>
-
-          <h3>🟢 Solo en la otra tienda</h3>
-          <ul>
-            {compareResult.soloEn2.map((id) => (
-              <li key={id}>{id}</li>
-            ))}
-          </ul>
-        </>
+      {notif && (
+        <div
+          className={`${
+            notif.error ? "bg-red-600" : "bg-green-600"
+          } text-white p-2 mb-3`}
+        >
+          {notif.text}
+        </div>
       )}
-    </>
+
+      <div className="mb-2">
+        <button
+          className="px-3 py-2 rounded bg-slate-700 text-white mr-2"
+          onClick={load}
+          disabled={loading}
+        >
+          Recargar
+        </button>
+        <button
+          className="px-3 py-2 rounded bg-emerald-600 text-white"
+          onClick={saveSelection}
+          disabled={loading}
+        >
+          Guardar selección
+        </button>
+      </div>
+
+      {loading && <div className="my-2">Cargando...</div>}
+
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="text-left border-b border-gray-700">
+            <th style={{ width: 40 }}>
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleAll}
+                disabled={loading || products.length === 0}
+              />
+            </th>
+            <th>Producto</th>
+            <th>Precio</th>
+            <th>VariantId</th>
+          </tr>
+        </thead>
+        <tbody>
+          {products.map((p) => (
+            <tr key={p.id} className="border-b border-gray-800">
+              <td>
+                <input
+                  type="checkbox"
+                  checked={!!selected[p.id]}
+                  onChange={() => toggleOne(p.id)}
+                  disabled={loading}
+                />
+              </td>
+              <td>{p.title}</td>
+              <td>{p.price ?? "—"}</td>
+              <td>{p.variantId ?? "—"}</td>
+            </tr>
+          ))}
+          {products.length === 0 && !loading && (
+            <tr>
+              <td colSpan={4} className="py-4 text-center text-gray-400">
+                No hay productos o la tienda no está autorizada.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }
-
-export default ProductManager;
