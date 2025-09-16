@@ -11,7 +11,8 @@ const router = express.Router();
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2023-04";
 
 const keyPending = (shop) => `pendingRecommendations_${shop}`;
-const keyCompetitors = (shop) => `competitorsCatalog_${shop}`; // opcional: si en el futuro ingestamos
+const keyCompetitors = (shop) => `competitorsCatalog_${shop}`; // opcional: ingesta futura
+const keySelected = (shop) => `selectedProducts_${shop}`; // selección guardada desde el frontend
 
 function normalizeTitle(s) {
   return String(s || "")
@@ -72,10 +73,12 @@ router.get("/comparison/ping", (_req, res) =>
 );
 
 /**
- * GET /comparison?shop=...&mode=title|exact|includes|fuzzy
- * Fuente de competencia:
- *  - Redis competitorsCatalog_<shop> (si existe)  => [{title, price}, ...]
- *  - Redis pendingRecommendations_<shop>          => items de review (title, competitorPrice)
+ * GET /comparison
+ * Query:
+ *  - shop: string (req)
+ *  - mode: title|exact|includes|fuzzy (opt, def=title)
+ *  - only=selected => filtra por selección guardada en Redis (selectedProducts_<shop>)
+ *  - ids=ID1,ID2,... => filtra por esos productId (números Shopify)
  */
 router.get(
   "/comparison",
@@ -84,11 +87,51 @@ router.get(
   async (req, res) => {
     try {
       const shop = req.shop;
-      const mode = String(req.query.mode || "title"); // title|exact|includes|fuzzy
+      const mode = String(req.query.mode || "title");
       const token = await getAccessTokenAuto(shop);
 
       // 1) Productos propios
-      const own = await fetchAllProducts(shop, token);
+      let own = await fetchAllProducts(shop, token);
+
+      // 1.a) Filtrado por ids explícitos
+      if (req.query.ids) {
+        const ids = String(req.query.ids)
+          .split(",")
+          .map((x) => Number(x.trim()))
+          .filter((n) => Number.isFinite(n));
+        if (ids.length) {
+          const idSet = new Set(ids);
+          own = own.filter((p) => idSet.has(p.id));
+        }
+      }
+
+      // 1.b) Filtrado por selección guardada
+      const onlySelected =
+        String(req.query.only || "").toLowerCase() === "selected" ||
+        req.query.selected === "1" ||
+        req.query.only === "1";
+      if (onlySelected) {
+        const rawSel = await redis.get(keySelected(shop));
+        if (rawSel) {
+          try {
+            const arr = JSON.parse(rawSel);
+            const ids = Array.isArray(arr)
+              ? arr.map((p) => Number(p.id)).filter(Number.isFinite)
+              : [];
+            if (ids.length) {
+              const idSet = new Set(ids);
+              own = own.filter((p) => idSet.has(p.id));
+            } else {
+              // sin ids válidos ⇒ lista vacía
+              own = [];
+            }
+          } catch {
+            own = [];
+          }
+        } else {
+          own = [];
+        }
+      }
 
       // 2) Fuente de competencia
       let competitors = [];
@@ -121,9 +164,6 @@ router.get(
       }
 
       // 3) Índices por título
-      const idxOwn = new Map();
-      for (const p of own) idxOwn.set(normalizeTitle(p.title), p);
-
       const idxComp = new Map();
       for (const c of competitors) idxComp.set(normalizeTitle(c.title), c);
 
@@ -140,7 +180,6 @@ router.get(
           match_method = mode === "exact" ? "exact" : "title";
           score = 1;
         } else if (mode === "includes") {
-          // búsqueda simple por inclusión
           for (const [ckey, cv] of idxComp.entries()) {
             if (ckey.includes(key) || key.includes(ckey)) {
               competitor = cv;
@@ -150,7 +189,6 @@ router.get(
             }
           }
         } else if (mode === "fuzzy") {
-          // fuzzy minimalista: intersección de tokens
           const ownTokens = new Set(key.split(" "));
           let best = null;
           let bestScore = 0;
@@ -181,7 +219,12 @@ router.get(
         });
       }
 
-      res.json({ shop, mode, items: rows });
+      res.json({
+        shop,
+        mode,
+        filteredBy: onlySelected ? "selected" : req.query.ids ? "ids" : "none",
+        items: rows,
+      });
     } catch (err) {
       console.error("GET /comparison error:", err);
       res.status(500).json({ error: "No se pudo generar comparación" });

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 export default function Comparison({ apiUrl, shop }) {
   const [mode, setMode] = useState("title"); // title | includes | fuzzy
+  const [onlySelected, setOnlySelected] = useState(true); // NUEVO: filtrar por selección
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
@@ -20,9 +21,12 @@ export default function Comparison({ apiUrl, shop }) {
     setLoading(true);
     setErr(null);
     try {
-      const url = `${apiUrl}/shopify/comparison?shop=${encodeURIComponent(
-        shop
-      )}&mode=${encodeURIComponent(mode)}`;
+      const qs = new URLSearchParams({
+        shop,
+        mode,
+        ...(onlySelected ? { only: "selected" } : {}),
+      });
+      const url = `${apiUrl}/shopify/comparison?${qs.toString()}`;
       const res = await fetch(url);
       if (!res.ok) {
         const t = await res.text();
@@ -42,7 +46,7 @@ export default function Comparison({ apiUrl, shop }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shop, mode]);
+  }, [shop, mode, onlySelected]);
 
   return (
     <div className="p-4 border border-gray-700 rounded mt-8">
@@ -56,7 +60,7 @@ export default function Comparison({ apiUrl, shop }) {
       </p>
 
       {/* Controles */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      <div className="flex flex-wrap items-center gap-3 mb-3">
         <label className="text-sm text-gray-300">Modo:</label>
         <select
           className="bg-slate-800 text-white px-2 py-1 rounded"
@@ -71,6 +75,16 @@ export default function Comparison({ apiUrl, shop }) {
           ))}
         </select>
 
+        <label className="inline-flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={onlySelected}
+            onChange={(e) => setOnlySelected(e.target.checked)}
+            disabled={loading}
+          />
+          Solo seleccionados
+        </label>
+
         <button
           className="px-3 py-2 rounded bg-slate-700 text-white"
           onClick={load}
@@ -80,8 +94,8 @@ export default function Comparison({ apiUrl, shop }) {
           Recargar
         </button>
 
-        {loading && <span className="ml-2 text-sm">Cargando…</span>}
-        {err && <span className="ml-2 text-sm text-red-400">⚠️ {err}</span>}
+        {loading && <span className="text-sm">Cargando…</span>}
+        {err && <span className="text-sm text-red-400">⚠️ {err}</span>}
       </div>
 
       {/* Tabla */}
@@ -125,7 +139,7 @@ export default function Comparison({ apiUrl, shop }) {
             {items.length === 0 && !loading && (
               <tr>
                 <td colSpan={6} className="py-4 text-center text-gray-400">
-                  No hay datos de comparación disponibles.
+                  No hay datos de comparación para el filtro aplicado.
                 </td>
               </tr>
             )}
