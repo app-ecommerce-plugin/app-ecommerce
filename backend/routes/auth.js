@@ -18,18 +18,18 @@ const SHOPIFY_SCOPES =
   process.env.SHOPIFY_SCOPES || "read_products,write_products,read_orders";
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2023-04";
 
-const stateKey = (state) => `oauth_state:${state}`;
+const stateKey = (s) => `oauth_state:${s}`;
 
 function buildAuthorizeURL(shop, state) {
   const base = `https://${shop}/admin/oauth/authorize`;
-  const params = new URLSearchParams({
+  const q = new URLSearchParams({
     client_id: SHOPIFY_API_KEY,
     scope: SHOPIFY_SCOPES,
     redirect_uri: SHOPIFY_REDIRECT_URI,
     state,
     "grant_options[]": "",
   });
-  return `${base}?${params.toString()}`;
+  return `${base}?${q.toString()}`;
 }
 
 function verifyHmac(queryObj, secret) {
@@ -40,10 +40,14 @@ function verifyHmac(queryObj, secret) {
     .createHmac("sha256", secret)
     .update(message)
     .digest("hex");
-  return crypto.timingSafeEqual(
-    Buffer.from(hmac, "utf8"),
-    Buffer.from(digest, "utf8")
-  );
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(hmac, "utf8"),
+      Buffer.from(digest, "utf8")
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function exchangeCodeForToken(shop, code) {
@@ -53,14 +57,14 @@ async function exchangeCodeForToken(shop, code) {
     client_secret: SHOPIFY_API_SECRET,
     code,
   };
-  const resp = await fetch(url, {
+  const r = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const txt = await resp.text();
-  if (!resp.ok) throw new Error(`access_token ${resp.status}: ${txt}`);
-  let json = null;
+  const txt = await r.text();
+  if (!r.ok) throw new Error(`access_token ${r.status}: ${txt}`);
+  let json;
   try {
     json = JSON.parse(txt);
   } catch {
@@ -69,73 +73,8 @@ async function exchangeCodeForToken(shop, code) {
   return json.access_token;
 }
 
-// ---- Handler común del callback (lo usaremos en 2 rutas alias)
-async function oauthCallbackHandler(req, res) {
-  try {
-    let { shop, code, state, hmac, host } = req.query;
+// ---------- Rutas
 
-    // derivar shop desde host si falta
-    if (!shop && host) {
-      try {
-        const decoded = Buffer.from(String(host), "base64").toString("utf8");
-        const m = decoded.match(/([a-zA-Z0-9][\w-]+\.myshopify\.com)/);
-        if (m) shop = m[1];
-      } catch (_) {}
-    }
-
-    const missing = [];
-    if (!shop) missing.push("shop");
-    if (!code) missing.push("code");
-    if (!state) missing.push("state");
-    if (!hmac) missing.push("hmac");
-    if (!host) missing.push("host");
-    if (missing.length) {
-      return res
-        .status(400)
-        .send(`Parámetros inválidos (faltan: ${missing.join(", ")})`);
-    }
-
-    // valida state
-    const raw = await redis.get(stateKey(state));
-    if (!raw)
-      return res
-        .status(400)
-        .send("Parámetros inválidos (state no reconocido o caducado)");
-    let stateObj = null;
-    try {
-      stateObj = JSON.parse(raw);
-    } catch {
-      return res.status(400).send("Parámetros inválidos (state corrupto)");
-    }
-    if (stateObj.shop !== shop)
-      return res
-        .status(400)
-        .send("Parámetros inválidos (shop/state no coinciden)");
-
-    // valida HMAC
-    if (!verifyHmac(req.query, SHOPIFY_API_SECRET)) {
-      return res.status(400).send("Parámetros inválidos (HMAC no válido)");
-    }
-
-    // token
-    const accessToken = await exchangeCodeForToken(shop, code);
-    const cipher = encrypt(accessToken);
-    await redis.set(tokenKey(shop), cipher);
-    await redis.sAdd("shops", shop);
-    await redis.del(stateKey(state));
-
-    return res
-      .status(200)
-      .send("✅ Instalación correcta. Ya puedes cerrar esta pestaña.");
-  } catch (err) {
-    console.error("OAuth callback error:", err);
-    return res
-      .status(400)
-      .send(`Parámetros inválidos (${String(err.message || err)})`);
-  }
-}
-
-// ---- Rutas
 router.get("/auth", validateShopParam, async (req, res) => {
   try {
     const shop = req.shop;
@@ -155,10 +94,72 @@ router.get("/auth", validateShopParam, async (req, res) => {
   }
 });
 
-// Alias de callback (ambas rutas válidas)
-router.get("/auth/shopify/callback", oauthCallbackHandler);
-router.get("/shopify/auth/callback", oauthCallbackHandler);
+// Handler único para los dos callbacks
+async function handleCallback(req, res) {
+  try {
+    let { shop, code, state, hmac, host } = req.query;
 
+    // Derivar shop desde host si falta
+    if (!shop && host) {
+      try {
+        const decoded = Buffer.from(String(host), "base64").toString("utf8"); // ej: tienda.myshopify.com/admin
+        const m = decoded.match(/([a-zA-Z0-9][\w-]+\.myshopify\.com)/);
+        if (m) shop = m[1];
+      } catch {}
+    }
+
+    const missing = [];
+    if (!shop) missing.push("shop");
+    if (!code) missing.push("code");
+    if (!state) missing.push("state");
+    if (!hmac) missing.push("hmac");
+    if (!host) missing.push("host");
+    if (missing.length) {
+      return res
+        .status(400)
+        .send(`Parámetros inválidos (faltan: ${missing.join(", ")})`);
+    }
+
+    // Validar state
+    const raw = await redis.get(stateKey(state));
+    if (!raw)
+      return res
+        .status(400)
+        .send("Parámetros inválidos (state no reconocido o caducado)");
+    const st = JSON.parse(raw);
+    if (st.shop !== shop)
+      return res
+        .status(400)
+        .send("Parámetros inválidos (shop/state no coinciden)");
+
+    // HMAC
+    if (!verifyHmac(req.query, SHOPIFY_API_SECRET)) {
+      return res.status(400).send("Parámetros inválidos (HMAC no válido)");
+    }
+
+    // Intercambio de code por token
+    const accessToken = await exchangeCodeForToken(shop, code);
+    const cipher = encrypt(accessToken);
+    await redis.set(tokenKey(shop), cipher);
+    await redis.sAdd("shops", shop);
+    await redis.del(stateKey(state));
+
+    return res
+      .status(200)
+      .send("✅ Instalación correcta. Ya puedes cerrar esta pestaña.");
+  } catch (err) {
+    console.error("GET /auth/callback error:", err);
+    return res
+      .status(400)
+      .send(`Parámetros inválidos (${String(err.message || err)})`);
+  }
+}
+
+// Exponer AMBAS rutas al mismo handler
+router.get("/auth/shopify/callback", handleCallback);
+router.get("/shopify/auth/callback", handleCallback);
+
+// Diagnóstico
 router.get("/auth/status", validateShopParam, async (req, res) => {
   try {
     const shop = req.shop;

@@ -8,6 +8,7 @@ const productsRoutes = require("./routes/products");
 const recommendRoutes = require("./routes/recommend");
 const comparisonRoutes = require("./routes/comparison");
 const debugRoutes = require("./routes/debug");
+const debugCompetitors = require("./routes/debugCompetitors");
 
 const app = express();
 
@@ -43,6 +44,7 @@ app.get("/auth/shopify/callback", (req, res) => {
 
 // ----- Debug
 app.use("/debug", debugRoutes);
+app.use("/debug", debugCompetitors);
 
 // 404 controlado
 app.use((req, res) => res.status(404).json({ error: "Ruta no encontrada" }));
