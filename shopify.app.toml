@@ -1,0 +1,18 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "1e886767e4d63025ce7e54ae541ce10d"
+name = "plugin-precios-dinamicos"
+application_url = "https://app-ecommerce-7h17.onrender.com/"
+embedded = true
+handle = "plugin-precios-dinamicos"
+
+[webhooks]
+api_version = "2025-01"
+
+[auth]
+redirect_urls = [
+  "https://app-ecommerce-7h17.onrender.com/shopify/auth/callback"
+]
+
+[pos]
+embedded = false

@@ -13,7 +13,7 @@ const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
 const SHOPIFY_REDIRECT_URI =
   process.env.SHOPIFY_REDIRECT_URI ||
-  "https://app-ecommerce-7h17.onrender.com/auth/shopify/callback";
+  "https://app-ecommerce-7h17.onrender.com/shopify/auth/callback";
 const SHOPIFY_SCOPES =
   process.env.SHOPIFY_SCOPES || "read_products,write_products,read_orders";
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2023-04";
@@ -109,11 +109,10 @@ async function handleCallback(req, res) {
     }
 
     const missing = [];
-    if (!shop) missing.push("shop");
+    if (!shop) missing.push("shop|host");
     if (!code) missing.push("code");
     if (!state) missing.push("state");
     if (!hmac) missing.push("hmac");
-    if (!host) missing.push("host");
     if (missing.length) {
       return res
         .status(400)
@@ -156,8 +155,9 @@ async function handleCallback(req, res) {
 }
 
 // Exponer AMBAS rutas al mismo handler
-router.get("/auth/shopify/callback", handleCallback);
-router.get("/shopify/auth/callback", handleCallback);
+//router.get("/auth/shopify/callback", handleCallback);
+//router.get("/shopify/auth/callback", handleCallback);
+router.get("/auth/callback", handleCallback);
 
 // Diagnóstico
 router.get("/auth/status", validateShopParam, async (req, res) => {
