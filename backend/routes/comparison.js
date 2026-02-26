@@ -8,6 +8,9 @@ const { getAccessTokenAuto } = require("../utils/crypto");
 
 const router = express.Router();
 
+const fs = require("fs");
+const path = require("path");
+
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2023-04";
 
 const keyPending = (shop) => `pendingRecommendations_${shop}`;
@@ -32,6 +35,26 @@ function parseLinkHeader(link) {
     if (m) out[m[2]] = m[1];
   }
   return out;
+}
+
+function loadLocalCompetitors(shop) {
+  try {
+    const fp = path.join(__dirname, "..", "external_data", `${shop}.json`);
+    if (!fs.existsSync(fp)) return [];
+    const raw = fs.readFileSync(fp, "utf8");
+    const data = JSON.parse(raw);
+    const arr = Array.isArray(data.products)
+      ? data.products
+      : Array.isArray(data)
+        ? data
+        : [];
+    return arr
+      .filter((x) => x && x.title)
+      .map((x) => ({ title: String(x.title), price: Number(x.price) || null }));
+  } catch (e) {
+    console.error("No se pudo leer external_data local:", e.message);
+    return [];
+  }
 }
 
 async function fetchAllProducts(shop, token) {
@@ -69,7 +92,7 @@ async function fetchAllProducts(shop, token) {
 
 // ---- Ping
 router.get("/comparison/ping", (_req, res) =>
-  res.json({ ok: true, service: "comparison" })
+  res.json({ ok: true, service: "comparison" }),
 );
 
 /**
@@ -134,11 +157,14 @@ router.get(
       }
 
       // 2) Fuente de competencia
+      // 2) Fuente de competencia
       let competitors = [];
-      const rawC = await redis.get(keyCompetitors(shop));
-      if (rawC) {
+
+      // 2.1) clave antigua (si existe)
+      const rawCatalog = await redis.get(`competitorsCatalog_${shop}`);
+      if (rawCatalog) {
         try {
-          const j = JSON.parse(rawC);
+          const j = JSON.parse(rawCatalog);
           if (Array.isArray(j)) {
             competitors = j
               .filter((x) => x && x.title)
@@ -149,8 +175,53 @@ router.get(
           }
         } catch {}
       }
+
+      // 2.2) clave de ingest (competitors_<shop>)
       if (competitors.length === 0) {
-        const rawP = await redis.get(keyPending(shop));
+        const rawIngest = await redis.get(`competitors_${shop}`);
+        if (rawIngest) {
+          try {
+            const j = JSON.parse(rawIngest);
+            const items = Array.isArray(j?.items)
+              ? j.items
+              : Array.isArray(j)
+                ? j
+                : [];
+            competitors = items
+              .filter((x) => x && x.title)
+              .map((x) => ({
+                title: String(x.title),
+                price: Number(x.price) || null,
+              }));
+          } catch {}
+        }
+      }
+
+      // 2.3) clave debug (competitors:<shop>)
+      if (competitors.length === 0) {
+        const rawDbg = await redis.get(`competitors:${shop}`);
+        if (rawDbg) {
+          try {
+            const j = JSON.parse(rawDbg);
+            const items = Array.isArray(j?.items) ? j.items : [];
+            competitors = items
+              .filter((x) => x && x.title)
+              .map((x) => ({
+                title: String(x.title),
+                price: Number(x.price) || null,
+              }));
+          } catch {}
+        }
+      }
+
+      // 2.4) ficheros locales (USE_LOCAL_FILES=true)
+      if (competitors.length === 0 && process.env.USE_LOCAL_FILES === "true") {
+        competitors = loadLocalCompetitors(shop);
+      }
+
+      // 2.5) último fallback: pendientes (si existían)
+      if (competitors.length === 0) {
+        const rawP = await redis.get(`pendingRecommendations_${shop}`);
         if (rawP) {
           try {
             const pend = JSON.parse(rawP);
@@ -229,7 +300,7 @@ router.get(
       console.error("GET /comparison error:", err);
       res.status(500).json({ error: "No se pudo generar comparación" });
     }
-  }
+  },
 );
 
 module.exports = router;
