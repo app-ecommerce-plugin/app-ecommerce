@@ -38,23 +38,39 @@ function parseLinkHeader(link) {
 }
 
 function loadLocalCompetitors(shop) {
-  try {
-    const fp = path.join(__dirname, "..", "external_data", `${shop}.json`);
-    if (!fs.existsSync(fp)) return [];
-    const raw = fs.readFileSync(fp, "utf8");
-    const data = JSON.parse(raw);
-    const arr = Array.isArray(data.products)
-      ? data.products
-      : Array.isArray(data)
-        ? data
-        : [];
-    return arr
-      .filter((x) => x && x.title)
-      .map((x) => ({ title: String(x.title), price: Number(x.price) || null }));
-  } catch (e) {
-    console.error("No se pudo leer external_data local:", e.message);
-    return [];
+  const base = path.join(__dirname, "..", "external_data");
+  const candidates = [
+    path.join(base, `${shop}.competitors.json`),
+    path.join(base, `${shop}-competitors.json`),
+    path.join(base, `${shop}.json`), // tu caso actual
+  ];
+
+  for (const fp of candidates) {
+    try {
+      if (!fs.existsSync(fp)) continue;
+      const raw = fs.readFileSync(fp, "utf8");
+      const data = JSON.parse(raw);
+
+      const arr = Array.isArray(data?.products)
+        ? data.products
+        : Array.isArray(data)
+          ? data
+          : [];
+
+      const out = arr
+        .filter((x) => x && x.title)
+        .map((x) => ({
+          title: String(x.title),
+          price: Number(x.price) || null,
+        }))
+        .filter((x) => x.price !== null);
+
+      if (out.length)
+        return { items: out, source: `file:${path.basename(fp)}` };
+    } catch (_) {}
   }
+
+  return { items: [], source: "file:none" };
 }
 
 async function fetchAllProducts(shop, token) {
@@ -157,79 +173,71 @@ router.get(
       }
 
       // 2) Fuente de competencia
-      // 2) Fuente de competencia
       let competitors = [];
+      let competitorsSource = "none";
 
-      // 2.1) clave antigua (si existe)
-      const rawCatalog = await redis.get(`competitorsCatalog_${shop}`);
-      if (rawCatalog) {
+      // 2.1 Redis: clave actual del comparison
+      const rawC = await redis.get(keyCompetitors(shop)); // competitorsCatalog_<shop>
+      if (rawC) {
         try {
-          const j = JSON.parse(rawCatalog);
+          const j = JSON.parse(rawC);
           if (Array.isArray(j)) {
             competitors = j
               .filter((x) => x && x.title)
               .map((x) => ({
                 title: String(x.title),
                 price: Number(x.price) || null,
-              }));
+              }))
+              .filter((x) => x.price !== null);
+            if (competitors.length)
+              competitorsSource = "redis:competitorsCatalog";
           }
         } catch {}
       }
 
-      // 2.2) clave de ingest (competitors_<shop>)
+      // 2.2 Redis: clave de ingest (/competitors/ingest)
       if (competitors.length === 0) {
         const rawIngest = await redis.get(`competitors_${shop}`);
         if (rawIngest) {
           try {
-            const j = JSON.parse(rawIngest);
-            const items = Array.isArray(j?.items)
-              ? j.items
-              : Array.isArray(j)
-                ? j
-                : [];
-            competitors = items
-              .filter((x) => x && x.title)
-              .map((x) => ({
-                title: String(x.title),
-                price: Number(x.price) || null,
-              }));
+            const obj = JSON.parse(rawIngest);
+            const items = Array.isArray(obj) ? obj : obj.items || [];
+            if (Array.isArray(items) && items.length) {
+              competitors = items
+                .filter((x) => x && x.title)
+                .map((x) => ({
+                  title: String(x.title),
+                  price: Number(x.price) || null,
+                }))
+                .filter((x) => x.price !== null);
+              if (competitors.length)
+                competitorsSource = "redis:competitors_ingest";
+            }
           } catch {}
         }
       }
 
-      // 2.3) clave debug (competitors:<shop>)
-      if (competitors.length === 0) {
-        const rawDbg = await redis.get(`competitors:${shop}`);
-        if (rawDbg) {
-          try {
-            const j = JSON.parse(rawDbg);
-            const items = Array.isArray(j?.items) ? j.items : [];
-            competitors = items
-              .filter((x) => x && x.title)
-              .map((x) => ({
-                title: String(x.title),
-                price: Number(x.price) || null,
-              }));
-          } catch {}
-        }
-      }
-
-      // 2.4) ficheros locales (USE_LOCAL_FILES=true)
+      // 2.3 Local files: external_data (USE_LOCAL_FILES=true)
       if (competitors.length === 0 && process.env.USE_LOCAL_FILES === "true") {
-        competitors = loadLocalCompetitors(shop);
+        const local = loadLocalCompetitors(shop);
+        competitors = local.items;
+        if (competitors.length) competitorsSource = local.source;
       }
 
-      // 2.5) último fallback: pendientes (si existían)
+      // 2.4 Fallback: pendientes
       if (competitors.length === 0) {
-        const rawP = await redis.get(`pendingRecommendations_${shop}`);
+        const rawP = await redis.get(keyPending(shop));
         if (rawP) {
           try {
             const pend = JSON.parse(rawP);
             const items = Array.isArray(pend?.items) ? pend.items : [];
-            competitors = items.map((it) => ({
-              title: String(it.title),
-              price: Number(it.competitorPrice) || null,
-            }));
+            competitors = items
+              .map((it) => ({
+                title: String(it.title),
+                price: Number(it.competitorPrice) || null,
+              }))
+              .filter((x) => x.price !== null);
+            if (competitors.length) competitorsSource = "redis:pending";
           } catch {}
         }
       }
@@ -294,6 +302,8 @@ router.get(
         shop,
         mode,
         filteredBy: onlySelected ? "selected" : req.query.ids ? "ids" : "none",
+        competitorsCount: competitors.length,
+        competitorsSource,
         items: rows,
       });
     } catch (err) {
